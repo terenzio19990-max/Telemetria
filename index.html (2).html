@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0c12">
+<title>REP Telemetria</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0c12'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
+<style>
+:root{ --bg:#0a0c12; --bg2:#12151d; --bg3:#1a1e28; --border:#2a2f3d; --text:#e8eaf0; --dim:#8a90a0;
+       --green:#30d158; --red:#ff453a; --cyan:#00e5ff; --yellow:#ffd60a; }
+*{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+body{ background:var(--bg); color:var(--text); font-family:-apple-system,system-ui,sans-serif;
+      min-height:100vh; min-height:100dvh; padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom)); }
+.wrap{ max-width:440px; margin:0 auto; display:flex; flex-direction:column; gap:14px; }
+h1{ font-size:17px; font-weight:800; letter-spacing:.04em; display:flex; align-items:center; gap:8px; }
+h1 small{ font-weight:500; color:var(--dim); font-size:11px; margin-left:auto; }
+.card{ background:var(--bg2); border:1px solid var(--border); border-radius:14px; padding:14px; }
+.lbl{ font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--dim); margin-bottom:8px; }
+.row{ display:flex; gap:10px; }
+input#code{ flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:10px; color:var(--text);
+  font-family:ui-monospace,monospace; font-size:22px; letter-spacing:.3em; text-align:center; text-transform:uppercase;
+  padding:12px; outline:none; }
+input#code:focus{ border-color:var(--cyan); }
+button{ border:none; border-radius:12px; font-weight:800; font-size:15px; letter-spacing:.03em;
+  padding:14px 18px; color:#fff; transition:transform .12s cubic-bezier(.23,1,.32,1), opacity .12s; }
+button:active{ transform:scale(.97); }
+button:disabled{ opacity:.35; }
+.b-blue{ background:#0a84ff; } .b-green{ background:#248a3d; } .b-red{ background:#c0392b; } .b-gray{ background:var(--bg3); border:1px solid var(--border); }
+.big{ width:100%; font-size:18px; padding:18px; }
+.status{ font-size:13px; line-height:1.5; color:var(--dim); min-height:20px; }
+.status.ok{ color:var(--green); } .status.err{ color:var(--red); }
+.speed{ text-align:center; padding:6px 0 2px; }
+.speed .v{ font-size:76px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
+.speed .u{ font-size:13px; color:var(--dim); letter-spacing:.1em; }
+.grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:10px; }
+.met{ background:var(--bg3); border-radius:10px; padding:8px; text-align:center; }
+.met .k{ font-size:9px; letter-spacing:.08em; color:var(--dim); font-weight:700; }
+.met .n{ font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:2px; }
+.dot{ width:9px; height:9px; border-radius:50%; background:var(--dim); display:inline-block; margin-right:6px; }
+.dot.on{ background:var(--green); box-shadow:0 0 8px var(--green); }
+.foot{ font-size:11px; color:var(--dim); text-align:center; line-height:1.6; }
+@media (prefers-reduced-motion:reduce){ button{ transition:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v1</small></h1>
+
+  <div class="card">
+    <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
+    <div class="row">
+      <input id="code" type="text" maxlength="6" placeholder="CODICE" autocapitalize="characters" autocomplete="off">
+      <button class="b-blue" id="btn-conn" onclick="doConnect()">CONNETTI</button>
+    </div>
+    <div class="status" id="st-conn" style="margin-top:8px">Inserisci il codice mostrato sul PC box (📍 GPS logger → RICEZIONE BOX).</div>
+  </div>
+
+  <div class="card">
+    <div class="speed"><div class="v" id="v">0</div><div class="u">KM/H</div></div>
+    <div class="grid">
+      <div class="met"><div class="k">V MAX</div><div class="n" id="vmax">—</div></div>
+      <div class="met"><div class="k">KM</div><div class="n" id="dist">0.00</div></div>
+      <div class="met"><div class="k">TEMPO</div><div class="n" id="time">0:00</div></div>
+      <div class="met"><div class="k">PUNTI</div><div class="n" id="npts">0</div></div>
+      <div class="met"><div class="k">GPS</div><div class="n" id="acc">—</div></div>
+      <div class="met"><div class="k">INVIATI</div><div class="n" id="sent">0</div></div>
+      <div class="met"><div class="k">G LAT</div><div class="n" id="glat">—</div></div>
+      <div class="met"><div class="k">G LONG</div><div class="n" id="glong">—</div></div>
+      <div class="met"><div class="k">G LAT MAX</div><div class="n" id="glatmax">—</div></div>
+    </div>
+  </div>
+
+  <button class="b-green big" id="btn-start" onclick="doStart()">▶ START</button>
+  <button class="b-red big" id="btn-stop" onclick="doStop()" disabled>⏹ STOP</button>
+  <button class="b-gray big" id="btn-csv" onclick="doExport()" disabled>⬇ SCARICA CSV</button>
+  <div class="status" id="st-gps"></div>
+
+  <div class="foot">Registra sempre anche in locale: se cade la connessione i dati non si perdono.<br>
+  Tieni lo schermo acceso (ci pensa la pagina se il telefono lo permette).</div>
+</div>
+
+<script>
+'use strict';
+/* PeerJS multi-CDN (stesso schema del software principale) */
+var PEERJS_CDNS=[
+ 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js',
+ 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js',
+ 'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js'
+];
+function ensurePeer(ok,fail){
+  if(typeof Peer!=='undefined'){ ok(); return; }
+  var i=0;
+  (function next(){
+    if(i>=PEERJS_CDNS.length){ fail&&fail(); return; }
+    var s=document.createElement('script');
+    s.src=PEERJS_CDNS[i++];
+    s.onload=function(){ typeof Peer!=='undefined'? ok() : next(); };
+    s.onerror=next;
+    document.head.appendChild(s);
+  })();
+}
+function $(id){ return document.getElementById(id); }
+function st(id,msg,cls){ var e=$(id); e.textContent=msg; e.className='status'+(cls?' '+cls:''); }
+
+var TX={ peer:null, conn:null, on:false };
+var REC={ pts:[], t0:0, dist:0, vmax:0, id:null, sent:0 };
+var wakeLock=null;
+
+function errMsg(t){
+  if(t==='peer-unavailable') return 'Codice errato o box non attivo';
+  if(t==='network'||t==='server-error'||t==='socket-error') return 'Internet non raggiungibile';
+  if(t==='browser-incompatible') return 'Browser non compatibile';
+  return t;
+}
+window.doConnect=function(){
+  if(TX.on){
+    try{ if(TX.conn&&TX.conn.open!==false) TX.conn.send({k:'end'}); }catch(e){}
+    try{ TX.conn&&TX.conn.close(); }catch(e){} try{ TX.peer&&TX.peer.destroy(); }catch(e){}
+    TX={peer:null,conn:null,on:false};
+    $('btn-conn').textContent='CONNETTI'; $('dot').className='dot';
+    st('st-conn','Scollegato.');
+    return;
+  }
+  var code=$('code').value.trim().toLowerCase();
+  if(code.length<4){ st('st-conn','Inserisci il codice del box.','err'); return; }
+  st('st-conn','Connessione…');
+  ensurePeer(function(){
+    try{ TX.peer=new Peer({debug:0}); }catch(e){ st('st-conn','Errore: '+e.message,'err'); return; }
+    TX.peer.on('open',function(){
+      var c=TX.peer.connect('reptel-'+code,{reliable:true});
+      TX.conn=c;
+      c.on('open',function(){
+        TX.on=true;
+        $('btn-conn').textContent='STACCA'; $('dot').className='dot on';
+        st('st-conn','Collegato al box — premi START.','ok');
+      });
+      c.on('close',function(){ TX.conn=null; $('dot').className='dot'; st('st-conn','Connessione chiusa dal box.','err'); });
+      c.on('error',function(){ st('st-conn','Errore connessione dati.','err'); });
+    });
+    TX.peer.on('error',function(err){ st('st-conn','Errore: '+errMsg(err.type||err.message),'err'); });
+    TX.peer.on('disconnected',function(){ try{ TX.peer.reconnect(); }catch(e){} });
+  },function(){ st('st-conn','PeerJS non caricabile: controlla internet.','err'); });
+};
+function hav(a1,o1,a2,o2){ var R=6371e3,p1=a1*Math.PI/180,p2=a2*Math.PI/180,dp=(a2-a1)*Math.PI/180,dl=(o2-o1)*Math.PI/180;
+  var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2); return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x)); }
+window.doStart=function(){
+  if(REC.id!==null) return;
+  if(!navigator.geolocation){ st('st-gps','GPS non disponibile in questo browser.','err'); return; }
+  REC={pts:[],t0:Date.now(),dist:0,vmax:0,id:null,sent:0};
+  $('btn-start').disabled=true; $('btn-stop').disabled=false;
+  st('st-gps','In attesa del segnale GPS… (consenti la posizione)');
+  if(navigator.wakeLock&&navigator.wakeLock.request){ navigator.wakeLock.request('screen').then(function(wl){ wakeLock=wl; }).catch(function(){}); }
+  motStart();
+  REC.id=navigator.geolocation.watchPosition(function(pos){
+    var c=pos.coords;
+    var p={ lat:c.latitude, lon:c.longitude, alt:(c.altitude!=null?c.altitude:0), v:(c.speed!=null?c.speed:null), t:(pos.timestamp||Date.now()) };
+    var last=REC.pts[REC.pts.length-1];
+    if(last){
+      var d=hav(last.lat,last.lon,p.lat,p.lon);
+      if(d<0.5) return;
+      REC.dist+=d;
+      if(p.v===null) p.v=d/Math.max(0.2,(p.t-last.t)/1000);
+    }
+    if(last && p.v!==null && last.v!==null){
+      var dtv=(p.t-last.t)/1000;
+      if(dtv>0.2) MOT.dvdt=(p.v-last.v)/dtv;   // per la calibrazione dell'asse avanti
+    }
+    p.gx=+MOT.glat.toFixed(3); p.gy=+MOT.glong.toFixed(3);
+    REC.pts.push(p);
+    if(p.v!==null) REC.vmax=Math.max(REC.vmax,p.v);
+    if(TX.on&&TX.conn&&TX.conn.open!==false){
+      try{ TX.conn.send({k:'p',a:p.lat,o:p.lon,h:p.alt,v:p.v,t:p.t}); REC.sent++; }catch(e){}
+    }
+    $('v').textContent = p.v!==null? Math.round(p.v*3.6) : '—';
+    $('vmax').textContent = Math.round(REC.vmax*3.6);
+    $('dist').textContent = (REC.dist/1000).toFixed(2);
+    $('npts').textContent = REC.pts.length;
+    $('sent').textContent = REC.sent;
+    $('acc').textContent = c.accuracy!=null? Math.round(c.accuracy)+'m' : '—';
+    var el=(Date.now()-REC.t0)/1000;
+    $('time').textContent = Math.floor(el/60)+':'+String(Math.floor(el%60)).padStart(2,'0');
+    st('st-gps', TX.on? 'Registro e trasmetto.' : 'Registro (solo locale: box non collegato).');
+  },function(err){
+    st('st-gps','Errore GPS: '+err.message,'err');
+  },{ enableHighAccuracy:true, maximumAge:0, timeout:10000 });
+};
+window.doStop=function(){
+  if(REC.id!==null){ try{ navigator.geolocation.clearWatch(REC.id); }catch(e){} REC.id=null; }
+  if(wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock=null; }
+  motStop();
+  if(TX.on&&TX.conn&&TX.conn.open!==false){ try{ TX.conn.send({k:'end'}); }catch(e){} }
+  $('btn-start').disabled=false; $('btn-stop').disabled=true;
+  $('btn-csv').disabled=!REC.pts.length;
+  st('st-gps', REC.pts.length? ('Fermato: '+REC.pts.length+' punti, '+(REC.dist/1000).toFixed(2)+' km, Vmax '+Math.round(REC.vmax*3.6)+' km/h. Il box ha salvato il percorso.') : 'Fermato (nessun punto).');
+};
+window.doExport=function(){
+  if(!REC.pts.length) return;
+  var csv='lat,lon,alt,speed_kmh,t_ms,glat_g,glong_g\n'+REC.pts.map(function(p){
+    return p.lat.toFixed(6)+','+p.lon.toFixed(6)+','+(+p.alt).toFixed(1)+','+(p.v!==null?(p.v*3.6).toFixed(1):'')+','+(p.t-REC.t0)+','+(p.gx!=null?p.gx:'')+','+(p.gy!=null?p.gy:'');
+  }).join('\n');
+  var name='gps_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.csv';
+  var blob=new Blob([csv],{type:'text/csv'});
+  if(navigator.share&&navigator.canShare&&navigator.canShare({files:[new File([blob],name)]})){
+    navigator.share({files:[new File([blob],name,{type:'text/csv'})]}).catch(function(){});
+  } else {
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  }
+};
+/* ── SENSORI DI MOVIMENTO: g laterale/longitudinale ──
+   Il telefono è montato con orientamento qualsiasi:
+   1) la gravità (giù) si stima in continuo con un passa-basso su
+      accelerationIncludingGravity;
+   2) l'accelerazione lineare si proietta sul piano orizzontale;
+   3) l'asse "avanti" si impara da solo alla prima frenata/accelerazione
+      netta (>1.2 m/s² dal GPS): in quell'istante l'accelerazione
+      orizzontale È la direzione di marcia (col segno di dv);
+   4) laterale = giù × avanti. Tutto in g. */
+var MOT={ on:false, g:[0,0,-9.81], f:null, glat:0, glong:0, pLat:0, pLong:0, dvdt:0, lastSend:0, calib:false };
+function motStart(){
+  function attach(){ window.addEventListener('devicemotion', onMotion); MOT.on=true;
+    MOT.f=null; MOT.calib=false; MOT.pLat=0; MOT.pLong=0; }
+  if(typeof DeviceMotionEvent==='undefined'){ return; }
+  if(DeviceMotionEvent.requestPermission){
+    DeviceMotionEvent.requestPermission().then(function(r){
+      if(r==='granted') attach();
+      else st('st-gps','Sensori di movimento negati: trasmetto solo il GPS.');
+    }).catch(function(){});
+  } else attach();
+}
+function motStop(){ if(MOT.on){ try{ window.removeEventListener('devicemotion', onMotion); }catch(e){} MOT.on=false; } }
+function onMotion(e){
+  var gi=e.accelerationIncludingGravity;
+  if(!gi || gi.x==null) return;
+  var al=0.02;
+  MOT.g[0]+=al*(gi.x-MOT.g[0]); MOT.g[1]+=al*(gi.y-MOT.g[1]); MOT.g[2]+=al*(gi.z-MOT.g[2]);
+  var a=e.acceleration, ax,ay,az;
+  if(a && a.x!=null){ ax=a.x; ay=a.y; az=a.z; }
+  else { ax=gi.x-MOT.g[0]; ay=gi.y-MOT.g[1]; az=gi.z-MOT.g[2]; }
+  var gn=Math.sqrt(MOT.g[0]*MOT.g[0]+MOT.g[1]*MOT.g[1]+MOT.g[2]*MOT.g[2])||9.81;
+  var gx=MOT.g[0]/gn, gy=MOT.g[1]/gn, gz=MOT.g[2]/gn;
+  var dot=ax*gx+ay*gy+az*gz;
+  var hx=ax-dot*gx, hy=ay-dot*gy, hz=az-dot*gz;
+  // calibrazione asse avanti
+  if(Math.abs(MOT.dvdt)>1.2){
+    var m=Math.sqrt(hx*hx+hy*hy+hz*hz);
+    if(m>0.8){
+      var sg=MOT.dvdt>0?1:-1;
+      var fx=sg*hx/m, fy=sg*hy/m, fz=sg*hz/m;
+      if(!MOT.f) MOT.f=[fx,fy,fz];
+      else {
+        MOT.f[0]=MOT.f[0]*0.9+fx*0.1; MOT.f[1]=MOT.f[1]*0.9+fy*0.1; MOT.f[2]=MOT.f[2]*0.9+fz*0.1;
+        var fn=Math.sqrt(MOT.f[0]*MOT.f[0]+MOT.f[1]*MOT.f[1]+MOT.f[2]*MOT.f[2])||1;
+        MOT.f[0]/=fn; MOT.f[1]/=fn; MOT.f[2]/=fn;
+      }
+      if(!MOT.calib){ MOT.calib=true; st('st-gps','Assi calibrati: g attive.'); }
+    }
+  }
+  if(MOT.f){
+    var f=MOT.f;
+    var lonG=(hx*f[0]+hy*f[1]+hz*f[2])/9.81;
+    var lx=gy*f[2]-gz*f[1], ly=gz*f[0]-gx*f[2], lz=gx*f[1]-gy*f[0];
+    var latG=(hx*lx+hy*ly+hz*lz)/9.81;
+    MOT.glat+=0.25*(latG-MOT.glat);
+    MOT.glong+=0.25*(lonG-MOT.glong);
+    MOT.pLat=Math.max(MOT.pLat,Math.abs(MOT.glat));
+    MOT.pLong=Math.max(MOT.pLong,Math.abs(MOT.glong));
+    $('glat').textContent=MOT.glat.toFixed(2);
+    $('glong').textContent=MOT.glong.toFixed(2);
+    $('glatmax').textContent=MOT.pLat.toFixed(2);
+    var now=Date.now();
+    if(now-MOT.lastSend>=200 && TX.on && TX.conn && TX.conn.open!==false){
+      MOT.lastSend=now;
+      try{ TX.conn.send({k:'g', x:+MOT.glat.toFixed(3), y:+MOT.glong.toFixed(3), t:now}); }catch(e2){}
+    }
+  } else if(REC.id!==null){
+    $('glat').textContent='cal…'; $('glong').textContent='cal…';
+  }
+  MOT.dvdt*=0.95;   // il dato GPS invecchia: senza decadimento una curva
+                    // lunga ruoterebbe l'asse avanti calibrato
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible'&&REC.id!==null&&navigator.wakeLock&&navigator.wakeLock.request){
+    navigator.wakeLock.request('screen').then(function(wl){ wakeLock=wl; }).catch(function(){});
+  }
+});
+</script>
+</body>
+</html>
