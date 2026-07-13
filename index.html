@@ -47,7 +47,7 @@ button:disabled{ opacity:.35; }
 </head>
 <body>
 <div class="wrap">
-  <h1>📡 REP TELEMETRIA <small>trasmettitore v1</small></h1>
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v1.1</small></h1>
 
   <div class="card">
     <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
@@ -102,6 +102,34 @@ function ensurePeer(ok,fail){
     document.head.appendChild(s);
   })();
 }
+/* TURN relay (Open Relay static auth): quando la connessione diretta
+   fra le due reti non si apre (CGNAT), il traffico passa dal relay.
+   Credenziali calcolate al volo con HMAC-SHA1; se WebCrypto manca,
+   si prosegue senza TURN come prima. */
+function repIce(cb){
+  try {
+    if(!(window.crypto&&crypto.subtle&&window.TextEncoder)){ cb(null); return; }
+    var secret='openrelayprojectsecret';
+    var username=String(Math.floor(Date.now()/1000)+12*3600);
+    var enc=new TextEncoder();
+    crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-1'},false,['sign'])
+    .then(function(key){ return crypto.subtle.sign('HMAC',key,enc.encode(username)); })
+    .then(function(sig){
+      var b=new Uint8Array(sig), s='';
+      for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
+      var cred=btoa(s);
+      cb({ iceServers:[
+        { urls:'stun:stun.l.google.com:19302' },
+        { urls:['turn:staticauth.openrelay.metered.ca:80',
+                'turn:staticauth.openrelay.metered.ca:443',
+                'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+                'turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
+          username:username, credential:cred }
+      ]});
+    })
+    .catch(function(){ cb(null); });
+  } catch(e){ cb(null); }
+}
 function $(id){ return document.getElementById(id); }
 function st(id,msg,cls){ var e=$(id); e.textContent=msg; e.className='status'+(cls?' '+cls:''); }
 
@@ -128,7 +156,8 @@ window.doConnect=function(){
   if(code.length<4){ st('st-conn','Inserisci il codice del box.','err'); return; }
   st('st-conn','Connessione…');
   ensurePeer(function(){
-    try{ TX.peer=new Peer({debug:0}); }catch(e){ st('st-conn','Errore: '+e.message,'err'); return; }
+   repIce(function(ice){
+    try{ TX.peer=new Peer(ice? {debug:0, config:ice} : {debug:0}); }catch(e){ st('st-conn','Errore: '+e.message,'err'); return; }
     TX.peer.on('open',function(){
       var c=TX.peer.connect('reptel-'+code,{reliable:true});
       TX.conn=c;
@@ -142,6 +171,7 @@ window.doConnect=function(){
     });
     TX.peer.on('error',function(err){ st('st-conn','Errore: '+errMsg(err.type||err.message),'err'); });
     TX.peer.on('disconnected',function(){ try{ TX.peer.reconnect(); }catch(e){} });
+   });
   },function(){ st('st-conn','PeerJS non caricabile: controlla internet.','err'); });
 };
 function hav(a1,o1,a2,o2){ var R=6371e3,p1=a1*Math.PI/180,p2=a2*Math.PI/180,dp=(a2-a1)*Math.PI/180,dl=(o2-o1)*Math.PI/180;
