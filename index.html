@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0c12">
+<title>REP Telemetria</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0c12'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
+<style>
+:root{ --bg:#0a0c12; --bg2:#12151d; --bg3:#1a1e28; --border:#2a2f3d; --text:#e8eaf0; --dim:#8a90a0;
+       --green:#30d158; --red:#ff453a; --cyan:#00e5ff; --yellow:#ffd60a; }
+*{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+body{ background:var(--bg); color:var(--text); font-family:-apple-system,system-ui,sans-serif;
+      min-height:100vh; min-height:100dvh; padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom)); }
+.wrap{ max-width:440px; margin:0 auto; display:flex; flex-direction:column; gap:14px; }
+h1{ font-size:17px; font-weight:800; letter-spacing:.04em; display:flex; align-items:center; gap:8px; }
+h1 small{ font-weight:500; color:var(--dim); font-size:11px; margin-left:auto; }
+.card{ background:var(--bg2); border:1px solid var(--border); border-radius:14px; padding:14px; }
+.lbl{ font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--dim); margin-bottom:8px; }
+.row{ display:flex; gap:10px; }
+input#code{ flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:10px; color:var(--text);
+  font-family:ui-monospace,monospace; font-size:22px; letter-spacing:.3em; text-align:center; text-transform:uppercase;
+  padding:12px; outline:none; }
+input#code:focus{ border-color:var(--cyan); }
+button{ border:none; border-radius:12px; font-weight:800; font-size:15px; letter-spacing:.03em;
+  padding:14px 18px; color:#fff; transition:transform .12s cubic-bezier(.23,1,.32,1), opacity .12s; }
+button:active{ transform:scale(.97); }
+button:disabled{ opacity:.35; }
+.b-blue{ background:#0a84ff; } .b-green{ background:#248a3d; } .b-red{ background:#c0392b; } .b-gray{ background:var(--bg3); border:1px solid var(--border); }
+.big{ width:100%; font-size:18px; padding:18px; }
+.status{ font-size:13px; line-height:1.5; color:var(--dim); min-height:20px; }
+.status.ok{ color:var(--green); } .status.err{ color:var(--red); }
+.speed{ text-align:center; padding:6px 0 2px; }
+.speed .v{ font-size:76px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
+.speed .u{ font-size:13px; color:var(--dim); letter-spacing:.1em; }
+.grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:10px; }
+.met{ background:var(--bg3); border-radius:10px; padding:8px; text-align:center; }
+.met .k{ font-size:9px; letter-spacing:.08em; color:var(--dim); font-weight:700; }
+.met .n{ font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:2px; }
+.dot{ width:9px; height:9px; border-radius:50%; background:var(--dim); display:inline-block; margin-right:6px; }
+.dot.on{ background:var(--green); box-shadow:0 0 8px var(--green); }
+.foot{ font-size:11px; color:var(--dim); text-align:center; line-height:1.6; }
+@media (prefers-reduced-motion:reduce){ button{ transition:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v2.9</small></h1>
+
+  <div class="card">
+    <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
+    <div class="row" style="margin-bottom:8px">
+      <input id="carname" type="text" maxlength="14" placeholder="NOME AUTO (es. CLIO 5)" autocapitalize="characters" autocomplete="off"
+        style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:15px;font-weight:700;text-align:center;text-transform:uppercase;padding:10px;outline:none">
+    </div>
+    <div class="row">
+      <input id="code" type="text" maxlength="6" placeholder="CODICE" autocapitalize="characters" autocomplete="off">
+      <button class="b-blue" id="btn-conn" onclick="doConnect()">CONNETTI</button>
+    </div>
+    <div class="status" id="st-conn" style="margin-top:8px">Inserisci il codice mostrato sul PC box (📍 GPS logger → RICEZIONE BOX).</div>
+  </div>
+
+  <div class="card">
+    <div class="speed"><div class="v" id="v">0</div><div class="u">KM/H</div></div>
+    <div class="grid">
+      <div class="met"><div class="k">V MAX</div><div class="n" id="vmax">—</div></div>
+      <div class="met"><div class="k">KM</div><div class="n" id="dist">0.00</div></div>
+      <div class="met"><div class="k">TEMPO</div><div class="n" id="time">0:00</div></div>
+      <div class="met"><div class="k">PUNTI</div><div class="n" id="npts">0</div></div>
+      <div class="met"><div class="k">GPS</div><div class="n" id="acc">—</div></div>
+      <div class="met"><div class="k">INVIATI</div><div class="n" id="sent">0</div></div>
+      <div class="met"><div class="k">G LAT</div><div class="n" id="glat">—</div></div>
+      <div class="met"><div class="k">G LONG</div><div class="n" id="glong">—</div></div>
+      <div class="met"><div class="k">G LAT MAX</div><div class="n" id="glatmax">—</div></div>
+    </div>
+  </div>
+
+  <button class="b-green big" id="btn-start" onclick="doStart()">▶ START</button>
+  <button class="b-red big" id="btn-stop" onclick="doStop()" disabled>⏹ STOP</button>
+  <button class="b-gray big" id="btn-csv" onclick="doExport()" disabled>⬇ SCARICA CSV</button>
+  <button class="b-gray big" id="btn-video" onclick="videoToggle()">🎥 VIDEO LIVE: OFF</button>
+  <button class="b-gray big" id="btn-mic" onclick="micToggle()">🎙 MICROFONO: OFF</button>
+  <button class="b-gray big" id="btn-fmt" onclick="fmtToggle()">📐 FORMATO: ORIZZONTALE</button>
+  <button class="b-gray big" onclick="lockScreen()">🔒 BLOCCA SCHERMO</button>
+  <button class="b-blue big" id="btn-vsave" style="display:none" onclick="videoSave()">💾 SALVA VIDEO</button>
+  <div class="status" id="st-video"></div>
+  <div class="status" id="st-gps"></div>
+
+  <div class="card" id="tx-sess-card" style="display:none">
+    <div class="lbl">🗂 REGISTRAZIONI SUL TELEFONO</div>
+    <div id="tx-sess-list"></div>
+    <div class="status" id="st-sess" style="margin-top:6px"></div>
+  </div>
+
+  <div class="foot">Registra sempre anche in locale: se cade la connessione i dati non si perdono.<br>
+  Tieni lo schermo acceso (ci pensa la pagina se il telefono lo permette).</div>
+</div>
+
+<script>
+'use strict';
+/* PeerJS multi-CDN (stesso schema del software principale) */
+var PEERJS_CDNS=[
+ 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js',
+ 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js',
+ 'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js'
+];
+function ensurePeer(ok,fail){
+  if(typeof Peer!=='undefined'){ ok(); return; }
+  var i=0;
+  (function next(){
+    if(i>=PEERJS_CDNS.length){ fail&&fail(); return; }
+    var s=document.createElement('script');
+    s.src=PEERJS_CDNS[i++];
+    s.onload=function(){ typeof Peer!=='undefined'? ok() : next(); };
+    s.onerror=next;
+    document.head.appendChild(s);
+  })();
+}
+/* TURN relay (Open Relay static auth): quando la connessione diretta
+   fra le due reti non si apre (CGNAT), il traffico passa dal relay.
+   Credenziali calcolate al volo con HMAC-SHA1; se WebCrypto manca,
+   si prosegue senza TURN come prima. */
+function repIce(cb){
+  try {
+    if(!(window.crypto&&crypto.subtle&&window.TextEncoder)){ cb(null); return; }
+    var secret='openrelayprojectsecret';
+    var username=String(Math.floor(Date.now()/1000)+12*3600);
+    var enc=new TextEncoder();
+    crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-1'},false,['sign'])
+    .then(function(key){ return crypto.subtle.sign('HMAC',key,enc.encode(username)); })
+    .then(function(sig){
+      var b=new Uint8Array(sig), s='';
+      for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
+      var cred=btoa(s);
+      cb({ iceServers:[
+        { urls:'stun:stun.l.google.com:19302' },
+        { urls:['turn:staticauth.openrelay.metered.ca:80',
+                'turn:staticauth.openrelay.metered.ca:443',
+                'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+                'turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
+          username:username, credential:cred }
+      ]});
+    })
+    .catch(function(){ cb(null); });
+  } catch(e){ cb(null); }
+}
+/* Canale di riserva via relay MQTT (WebSocket): solo connessioni in
+   uscita → funziona anche con CGNAT su entrambi i lati. */
+var MQTT_CDNS=[
+ 'https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js',
+ 'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js'
+];
+var MQ_BROKERS=[
+ 'wss://broker.emqx.io:8084/mqtt',
+ 'wss://broker.hivemq.com:8884/mqtt',
+ 'wss://test.mosquitto.org:8081'
+];
+function ensureMqtt(ok,fail){
+  if(typeof window.mqtt!=='undefined'){ ok(); return; }
+  var i=0;
+  (function next(){
+    if(i>=MQTT_CDNS.length){ fail&&fail(); return; }
+    var s=document.createElement('script');
+    s.src=MQTT_CDNS[i++];
+    s.onload=function(){ typeof window.mqtt!=='undefined'? ok() : next(); };
+    s.onerror=next;
+    document.head.appendChild(s);
+  })();
+}
+function $(id){ return document.getElementById(id); }
+function st(id,msg,cls){ var e=$(id); e.textContent=msg; e.className='status'+(cls?' '+cls:''); }
+
+var TX={ peer:null, conn:null, mq:null, on:false, code:'', want:false, lastAck:0, monT:null };
+var REC={ pts:[], t0:0, dist:0, vmax:0, id:null, sent:0 };
+var wakeLock=null;
+
+function carName(){
+  var v=($('carname')&&$('carname').value.trim())||'';
+  if(!v){ v=localStorage.getItem('reptx_name')||'AUTO 1'; if($('carname')) $('carname').value=v; }
+  return v.toUpperCase();
+}
+function txSend(d){
+  d.c=carName();
+  if(TX.conn && TX.conn.open!==false && !TX.mq){
+    try{ TX.conn.send(d); return true; }catch(e){}
+  }
+  if(TX.mq){
+    try{ TX.mq.publish('reptel/'+TX.code, JSON.stringify(d)); return true; }catch(e){}
+  }
+  return false;
+}
+function mqFallback(){
+  if(TX.on) return;
+  st('st-conn','Rete diretta bloccata: passo dal relay…');
+  ensureMqtt(function(){ mqTry(0); }, function(){ st('st-conn','Relay non caricabile: controlla internet.','err'); });
+}
+function mqTry(i){
+  if(TX.mq) return;
+  if(i>=MQ_BROKERS.length){ st('st-conn','Nessun relay raggiungibile.','err'); return; }
+  var c;
+  try { c=window.mqtt.connect(MQ_BROKERS[i],{connectTimeout:6000,reconnectPeriod:3000,clean:true}); }
+  catch(e){ mqTry(i+1); return; }
+  var settled=false;
+  c.on('connect',function(){
+    if(TX.mq){ try{c.end(true);}catch(e){} return; }
+    settled=true; TX.mq=c; TX.on=true; TX.lastAck=Date.now();
+    try{ if(TX.peer) TX.peer.destroy(); }catch(e){} TX.peer=null; TX.conn=null;
+    try { c.subscribe('reptel/'+TX.code+'/cmd'); } catch(e){}
+    c.on('message',function(topic,payload){
+      try { handleBoxMsg(JSON.parse(payload.toString())); } catch(e){}
+    });
+    $('btn-conn').textContent='STACCA'; $('dot').className='dot on';
+    st('st-conn','Collegato al box via relay — premi START.','ok');
+  });
+  c.on('error',function(){ if(!settled){ settled=true; try{c.end(true);}catch(e){} mqTry(i+1); } });
+}
+function errMsg(t){
+  if(t==='peer-unavailable') return 'Codice errato o box non attivo';
+  if(t==='network'||t==='server-error'||t==='socket-error') return 'Internet non raggiungibile';
+  if(t==='browser-incompatible') return 'Browser non compatibile';
+  return t;
+}
+/* ── messaggi dal box: battiti (ack) e comandi remoti ── */
+function handleBoxMsg(m){
+  if(!m||!m.k) return;
+  TX.lastAck=Date.now();
+  if(m.k==='cmd') execCmd(m);
+}
+function execCmd(m){
+  var to=(m.to==null?'*':String(m.to).toUpperCase());
+  if(to!=='*' && to!==carName()) return;
+  var c=m.cmd, ok=true;
+  try {
+    if(c==='start'){ if(REC.id===null) doStart(); }
+    else if(c==='stop'){ if(REC.id!==null) doStop(); }
+    else if(c==='video_on'){ if(!VID.want) videoToggle(); }
+    else if(c==='video_off'){ if(VID.want) videoToggle(); }
+    else if(c==='mic_on'){ if(!VID.mic) micToggle(); }
+    else if(c==='mic_off'){ if(VID.mic) micToggle(); }
+    else ok=false;
+  } catch(e){ ok=false; }
+  txSend({k:'cack',cmd:c,ok:ok?1:0});
+  if(ok) st('st-conn','🎛 Comando dal box eseguito: '+c,'ok');
+}
+/* ── GUARDIANO DATI: il box manda un battito ogni 5 s su tutti i
+   canali. Se per troppo tempo non arriva nulla, il canale e' morto
+   anche se non ha dato errori: diretto→relay, relay muto→ricollega
+   tutto da capo con lo stesso codice. GPS e REC locale non si fermano. ── */
+function dropDirect(){
+  st('st-conn','🔁 Canale diretto muto: passo al relay…','err');
+  try { TX.conn&&TX.conn.close(); } catch(e){}
+  try { TX.peer&&TX.peer.destroy(); } catch(e){}
+  TX.conn=null; TX.peer=null; TX.on=false;
+  mqFallback();
+}
+function reDial(){
+  if(!TX.want) return;
+  st('st-conn','🔁 Box silenzioso: ricollego (stesso codice)…','err');
+  try { TX.mq&&TX.mq.end(true); } catch(e){}
+  try { TX.conn&&TX.conn.close(); } catch(e){}
+  try { TX.peer&&TX.peer.destroy(); } catch(e){}
+  TX.mq=null; TX.conn=null; TX.peer=null; TX.on=false;
+  setTimeout(function(){ if(TX.want && !TX.on) mqFallback(); }, (window._REP_MQ_T||8000));
+  dialDirect(TX.code);
+}
+function dataMonitor(){
+  if(!TX.want) return;
+  // il canale diretto puo' morire in fretta: controlla anche lo stato ICE
+  if(TX.conn && !TX.mq && TX.conn.peerConnection){
+    var ics=TX.conn.peerConnection.iceConnectionState;
+    if(ics==='failed'||ics==='closed'||ics==='disconnected'){ TX.lastAck=Date.now(); dropDirect(); return; }
+  }
+  if(Date.now()-(TX.lastAck||0) < (window._REP_ACK_MS||25000)) return;
+  TX.lastAck=Date.now();               // un solo tentativo per finestra
+  if(TX.conn && !TX.mq) dropDirect();
+  else reDial();
+}
+window.doConnect=function(){
+  if(TX.on){
+    try{ txSend({k:'end'}); }catch(e){}
+    try{ TX.conn&&TX.conn.close(); }catch(e){} try{ TX.peer&&TX.peer.destroy(); }catch(e){}
+    try{ TX.mq&&TX.mq.end(true); }catch(e){}
+    clearInterval(TX.monT);
+    TX={peer:null,conn:null,mq:null,on:false,code:'',want:false,lastAck:0,monT:null};
+    if(VID.want||VID.mic){ VID.want=false; VID.mic=false;
+      $('btn-video').textContent='🎥 VIDEO LIVE: OFF';
+      $('btn-mic').textContent='🎙 MICROFONO: OFF';
+      videoStop('Audio/video spenti (scollegato).'); }
+    $('btn-conn').textContent='CONNETTI'; $('dot').className='dot';
+    st('st-conn','Scollegato.');
+    return;
+  }
+  var code=$('code').value.trim().toLowerCase();
+  if(code.length<4){ st('st-conn','Inserisci il codice del box.','err'); return; }
+  TX.code=code;
+  TX.want=true; TX.lastAck=Date.now();
+  clearInterval(TX.monT);
+  TX.monT=setInterval(dataMonitor,(window._REP_DATA_MON||10000));
+  try{ localStorage.setItem('reptx_name', carName()); }catch(e){}
+  st('st-conn','Connessione…');
+  setTimeout(function(){ if(!TX.on) mqFallback(); }, (window._REP_MQ_T||8000));
+  dialDirect(code);
+};
+function dialDirect(code){
+  ensurePeer(function(){
+   repIce(function(ice){
+    try{ TX.peer=new Peer(ice? {debug:0, config:ice} : {debug:0}); }catch(e){ st('st-conn','Errore: '+e.message,'err'); return; }
+    TX.peer.on('open',function(){
+      var c=TX.peer.connect('reptel-'+code,{reliable:true});
+      TX.conn=c;
+      c.on('data',handleBoxMsg);
+      c.on('open',function(){
+        TX.on=true; TX.lastAck=Date.now();
+        $('btn-conn').textContent='STACCA'; $('dot').className='dot on';
+        st('st-conn','Collegato al box — premi START.','ok');
+      });
+      c.on('close',function(){
+        if(TX.mq) return;
+        TX.conn=null; TX.on=false;
+        $('dot').className='dot';
+        st('st-conn','Canale diretto perso: passo al relay…','err');
+        mqFallback();
+      });
+      c.on('error',function(){
+        if(!TX.on){ mqFallback(); return; }
+        if(!TX.mq){
+          TX.conn=null; TX.on=false;
+          st('st-conn','Errore canale diretto: passo al relay…','err');
+          mqFallback();
+        }
+      });
+    });
+    TX.peer.on('error',function(err){ st('st-conn','Errore: '+errMsg(err.type||err.message),'err'); });
+    TX.peer.on('disconnected',function(){ try{ TX.peer.reconnect(); }catch(e){} });
+   });
+  },function(){ st('st-conn','PeerJS non caricabile: controlla internet.','err'); });
+}
+function hav(a1,o1,a2,o2){ var R=6371e3,p1=a1*Math.PI/180,p2=a2*Math.PI/180,dp=(a2-a1)*Math.PI/180,dl=(o2-o1)*Math.PI/180;
+  var x=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2); return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x)); }
+window.doStart=function(){
+  if(REC.id!==null) return;
+  if(!navigator.geolocation){ st('st-gps','GPS non disponibile in questo browser.','err'); return; }
+  REC={pts:[],t0:Date.now(),dist:0,vmax:0,id:null,sent:0};
+  lapsReset();
+  $('btn-start').disabled=true; $('btn-stop').disabled=false;
+  st('st-gps','In attesa del segnale GPS… (consenti la posizione)');
+  if(navigator.wakeLock&&navigator.wakeLock.request){ navigator.wakeLock.request('screen').then(function(wl){ wakeLock=wl; }).catch(function(){}); }
+  motStart();
+  REC.id=navigator.geolocation.watchPosition(function(pos){
+    var c=pos.coords;
+    // filtro qualita': punti con incertezza alta non inquinano traccia e distanza
+    if(c.accuracy!=null && c.accuracy>30){
+      REC.skipped=(REC.skipped||0)+1;
+      $('acc').textContent=Math.round(c.accuracy)+'m ✗';
+      return;
+    }
+    var p={ lat:c.latitude, lon:c.longitude, alt:(c.altitude!=null?c.altitude:0), v:(c.speed!=null?c.speed:null), t:(pos.timestamp||Date.now()), q:(c.accuracy!=null? Math.round(c.accuracy):null) };
+    var last=REC.pts[REC.pts.length-1];
+    if(last){
+      var d=hav(last.lat,last.lon,p.lat,p.lon);
+      var dtF=Math.max(0.2,(p.t-last.t)/1000);
+      if(d/dtF>130) return;              // salto GPS impossibile (>470 km/h): scarta
+      if(d<0.5) return;
+      REC.dist+=d;
+      if(p.v===null) p.v=d/dtF;
+    }
+    if(p.v!==null) MOT.vF=p.v;           // il fix GPS (Doppler) riaggancia la velocita' fusa
+    lapsUpdate(p);
+    if(REC.pts.length%20===0 && REC.pts.length>0) draftSave();   // bozza anti-crash
+    if(last && p.v!==null && last.v!==null){
+      var dtv=(p.t-last.t)/1000;
+      if(dtv>0.2) MOT.dvdt=(p.v-last.v)/dtv;   // per la calibrazione dell'asse avanti
+    }
+    p.gx=+MOT.glat.toFixed(3); p.gy=+MOT.glong.toFixed(3);
+    REC.pts.push(p);
+    if(p.v!==null) REC.vmax=Math.max(REC.vmax,p.v);
+    if(TX.on && txSend({k:'p',a:p.lat,o:p.lon,h:p.alt,v:p.v,t:p.t,q:p.q})) REC.sent++;
+    $('v').textContent = p.v!==null? Math.round(p.v*3.6) : '—';
+    $('vmax').textContent = Math.round(REC.vmax*3.6);
+    $('dist').textContent = (REC.dist/1000).toFixed(2);
+    $('npts').textContent = REC.pts.length;
+    $('sent').textContent = REC.sent;
+    $('acc').textContent = c.accuracy!=null? Math.round(c.accuracy)+'m' : '—';
+    var el=(Date.now()-REC.t0)/1000;
+    $('time').textContent = Math.floor(el/60)+':'+String(Math.floor(el%60)).padStart(2,'0');
+    st('st-gps', TX.on? 'Registro e trasmetto.' : 'Registro (solo locale: box non collegato).');
+  },function(err){
+    st('st-gps','Errore GPS: '+err.message,'err');
+  },{ enableHighAccuracy:true, maximumAge:0, timeout:10000 });
+};
+window.doStop=function(){
+  if(REC.id!==null){ try{ navigator.geolocation.clearWatch(REC.id); }catch(e){} REC.id=null; }
+  if(wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock=null; }
+  motStop();
+  if(TX.on){ try{ txSend({k:'end'}); }catch(e){} }
+  $('btn-start').disabled=false; $('btn-stop').disabled=true;
+  $('btn-csv').disabled=!REC.pts.length;
+  sessStore();
+  try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
+  st('st-gps', REC.pts.length? ('Fermato: '+REC.pts.length+' punti, '+(REC.dist/1000).toFixed(2)+' km, Vmax '+Math.round(REC.vmax*3.6)+' km/h. Il box ha salvato il percorso.') : 'Fermato (nessun punto).');
+};
+window.doExport=function(){
+  if(!REC.pts.length) return;
+  var csv='lat,lon,alt,speed_kmh,t_ms,glat_g,glong_g,acc_m\n'+REC.pts.map(function(p){
+    return p.lat.toFixed(6)+','+p.lon.toFixed(6)+','+(+p.alt).toFixed(1)+','+(p.v!==null?(p.v*3.6).toFixed(1):'')+','+(p.t-REC.t0)+','+(p.gx!=null?p.gx:'')+','+(p.gy!=null?p.gy:'')+','+(p.q!=null?p.q:'');
+  }).join('\n');
+  var name='gps_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.csv';
+  var blob=new Blob([csv],{type:'text/csv'});
+  if(navigator.share&&navigator.canShare&&navigator.canShare({files:[new File([blob],name)]})){
+    navigator.share({files:[new File([blob],name,{type:'text/csv'})]}).catch(function(){});
+  } else {
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  }
+};
+/* ── BLOCCO TOUCH: velo che assorbe ogni tocco accidentale.
+      Sblocco: pressione continua di 5 s in un punto qualsiasi. ── */
+var LOCK={ el:null, t0:0, timer:null, ui:null };
+window.lockScreen=function(){
+  if(LOCK.el) return;
+  var dv=document.createElement('div');
+  dv.id='lockscreen';
+  dv.style.cssText='position:fixed;inset:0;z-index:999999;background:rgba(4,5,8,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:none';
+  dv.innerHTML='<div style="font-size:40px">🔒</div>'+
+    '<div id="lock-v" style="font-size:72px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1">—</div>'+
+    '<div style="font-size:12px;color:var(--dim);letter-spacing:.1em">KM/H</div>'+
+    '<div id="lock-info" class="status" style="text-align:center;font-size:15px"></div>'+
+    '<div style="width:70%;max-width:260px;height:10px;background:var(--bg3);border-radius:5px;overflow:hidden">'+
+    '<div id="lock-bar" style="height:100%;width:0%;background:var(--green)"></div></div>'+
+    '<div class="status" style="text-align:center">Schermo bloccato<br>tieni premuto 5 secondi per sbloccare</div>';
+  document.body.appendChild(dv);
+  LOCK.el=dv;
+  function hold(e){ if(e&&e.cancelable) e.preventDefault();
+    if(LOCK.timer) return;
+    LOCK.t0=Date.now();
+    LOCK.timer=setInterval(function(){
+      var f=Math.min(1,(Date.now()-LOCK.t0)/5000);
+      var b=$('lock-bar'); if(b) b.style.width=(f*100)+'%';
+      if(f>=1) window.unlockScreen();
+    },100);
+  }
+  function release(e){ if(e&&e.cancelable) e.preventDefault();
+    clearInterval(LOCK.timer); LOCK.timer=null;
+    var b=$('lock-bar'); if(b) b.style.width='0%';
+  }
+  dv.addEventListener('touchstart',hold,{passive:false});
+  dv.addEventListener('touchend',release,{passive:false});
+  dv.addEventListener('touchcancel',release,{passive:false});
+  dv.addEventListener('touchmove',function(e){ if(e.cancelable) e.preventDefault(); },{passive:false});
+  dv.addEventListener('mousedown',hold);
+  dv.addEventListener('mouseup',release);
+  dv.addEventListener('mouseleave',release);
+  dv.addEventListener('contextmenu',function(e){ e.preventDefault(); });
+  LOCK.ui=setInterval(function(){
+    var lv=$('lock-v'); if(lv) lv.textContent=$('v').textContent;
+    var li=$('lock-info');
+    if(li){
+      var parts=[];
+      if(REC.id!==null) parts.push('● REC '+$('time').textContent);
+      if(TX.on) parts.push('📡 box');
+      var g=$('glat').textContent;
+      if(g!=='—'&&g!=='OFF') parts.push('g '+g);
+      li.textContent=parts.join(' · ');
+    }
+  },500);
+};
+window.unlockScreen=function(){
+  clearInterval(LOCK.timer); LOCK.timer=null;
+  clearInterval(LOCK.ui); LOCK.ui=null;
+  if(LOCK.el){ LOCK.el.remove(); LOCK.el=null; }
+};
+/* ── VIDEO LIVE (opzionale, OFF di default): camera → box via WebRTC.
+      Consuma dati e batteria; viaggia SOLO sul canale WebRTC (il relay
+      dati MQTT non porta video), quindi su reti molto chiuse puo' non
+      essere disponibile: in quel caso i dati continuano normalmente. ── */
+var VID={ want:false, mic:false, portrait:false, stream:null, rawStream:null, call:null, peer:null, timer:null,
+          rec:null, chunks:[], recMime:'', lastBlob:null, recBytes:0,
+          cam:null, canvas:null, ctx:null, drawTimer:null, mon:null, lastLive:0 };
+window.fmtToggle=function(){
+  VID.portrait=!VID.portrait;
+  try { localStorage.setItem('reptx_portrait', VID.portrait?'1':'0'); } catch(e){}
+  var b=$('btn-fmt'); if(b) b.textContent='📐 FORMATO: '+(VID.portrait?'VERTICALE':'ORIZZONTALE');
+  if(VID.want||VID.mic){ avRestart(); st('st-video','Formato cambiato: riavvio la ripresa… (scegli il formato PRIMA del run: questo riavvio può richiedere un nuovo consenso)'); }
+  else if(VID.rawStream){ videoStop('Formato aggiornato: si applica alla prossima accensione (chiederà il consenso).'); }
+};
+/* ── REGISTRAZIONE LOCALE: la camera scrive sempre anche sul telefono,
+      cosi' se il live cade il video non si perde. Il file resta in
+      memoria fino al salvataggio (o alla ripresa successiva). ── */
+/* ── OVERLAY VIDEO: la camera passa da un canvas dove a 15 fps si
+      disegnano nome, velocita', lap, g e pedali stimati; il canvas
+      diventa il video registrato E trasmesso. Se il canvas non e'
+      disponibile si torna al flusso grezzo. ── */
+function overlayPipeline(stream){
+  var vt=stream.getVideoTracks? stream.getVideoTracks():[];
+  if(!vt.length || !window.HTMLCanvasElement) return stream;
+  try {
+    var cv=document.createElement('canvas');
+    if(VID.portrait){ cv.width=360; cv.height=640; } else { cv.width=640; cv.height=360; }
+    var ctx=cv.getContext('2d');
+    if(!ctx || !cv.captureStream) return stream;
+    var cam=document.createElement('video');
+    cam.muted=true; cam.playsInline=true; cam.autoplay=true;
+    try { cam.srcObject=new MediaStream(vt); } catch(e){ try { cam.srcObject=stream; } catch(e2){} }
+    try { cam.play&&cam.play().catch(function(){}); } catch(e){}
+    VID.cam=cam; VID.canvas=cv; VID.ctx=ctx;
+    clearInterval(VID.drawTimer);
+    VID.drawTimer=setInterval(function(){ drawOverlay(ctx,cam,cv); },66);
+    var cs=cv.captureStream(15);
+    var out=cs.getVideoTracks().slice();
+    (stream.getAudioTracks? stream.getAudioTracks():[]).forEach(function(t){ out.push(t); });
+    return new MediaStream(out);
+  } catch(e){ return stream; }
+}
+function drawOverlay(ctx,cam,cv){
+  try {
+    /* il canvas adotta l'aspetto REALE della camera: fotogramma intero,
+       niente ritagli ne' stiramenti (lato lungo fisso a 640 px) */
+    if(cam && cam.videoWidth>0 && cam.videoHeight>0){
+      var vw=cam.videoWidth, vh=cam.videoHeight, tw, th;
+      if(vw>=vh){ tw=640; th=Math.round(640*vh/vw); }
+      else { th=640; tw=Math.round(640*vw/vh); }
+      if(cv.width!==tw || cv.height!==th){ cv.width=tw; cv.height=th; }
+    }
+    var W=cv.width,H=cv.height;
+    if(cam && cam.readyState>=2) ctx.drawImage(cam,0,0,W,H);
+    else { ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H); }
+    function strip(x,y,w,h){ ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(x,y,w,h); }
+    // nome + REC (alto sx)
+    strip(8,8,190,26);
+    ctx.fillStyle='#ff453a'; ctx.beginPath(); ctx.arc(22,21,5,0,7); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='left';
+    ctx.fillText(carName().slice(0,14),34,26);
+    // lap: alto dx in orizzontale, sotto il nome in verticale
+    var lapX=(H>W)? 8 : W-232, lapY=(H>W)? 40 : 8;
+    strip(lapX,lapY,224,26);
+    ctx.font='bold 13px monospace';
+    var cur=LAPS.startPt? (Date.now()-LAPS.lapStartT):null;
+    ctx.fillText('L'+(LAPS.count+1)+' '+fmtLap(cur)+'  BEST '+fmtLap(LAPS.best),lapX+8,lapY+18);
+    // velocita' (basso sx)
+    strip(8,H-58,150,50);
+    ctx.font='bold 34px monospace';
+    ctx.fillText(String(Math.round((MOT.vF||0)*3.6)),16,H-20);
+    ctx.font='bold 12px sans-serif'; ctx.fillText('km/h',110,H-20);
+    // pedali stimati dalla g long (basso centro-sx)
+    var thr=MOT.calib? Math.max(0,Math.min(1,MOT.glong/0.35)):0;
+    var brk=MOT.calib? Math.max(0,Math.min(1,-MOT.glong/1.0)):0;
+    strip(170,H-58,64,50);
+    ctx.fillStyle='rgba(255,255,255,.25)'; ctx.fillRect(178,H-52,20,38); ctx.fillRect(206,H-52,20,38);
+    ctx.fillStyle='#30d158'; ctx.fillRect(178,H-14-thr*38,20,thr*38);
+    ctx.fillStyle='#ff453a'; ctx.fillRect(206,H-14-brk*38,20,brk*38);
+    ctx.fillStyle='#fff'; ctx.font='9px sans-serif';
+    ctx.fillText('GAS',178,H-4); ctx.fillText('FRENO',204,H-4);
+    // cerchietto g (basso dx)
+    var cx=W-40,cy=H-34,R=24;
+    strip(W-76,H-66,68,60);
+    ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.stroke();
+    var gx=Math.max(-1.5,Math.min(1.5,MOT.glat)), gy=Math.max(-1.5,Math.min(1.5,MOT.glong));
+    ctx.fillStyle='#00e5ff'; ctx.beginPath();
+    ctx.arc(cx+gx/1.5*R, cy+gy/1.5*R, 5,0,7); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='9px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(MOT.calib? (Math.abs(MOT.glat).toFixed(1)+'g'):'cal', cx, H-6);
+    ctx.textAlign='left';
+  } catch(e){}
+}
+function recStart(stream){
+  VID.rec=null; VID.chunks=[]; VID.recBytes=0;
+  if(!(window.MediaRecorder)) return;
+  var mime='';
+  try {
+    ['video/mp4','video/webm;codecs=vp8,opus','video/webm'].some(function(m){
+      if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)){ mime=m; return true; }
+      return false;
+    });
+  } catch(e){}
+  try {
+    VID.rec=new MediaRecorder(stream, mime? { mimeType:mime, videoBitsPerSecond:900000, audioBitsPerSecond:64000 } : {});
+    VID.recMime=mime||'video/webm';
+    VID.rec.ondataavailable=function(e){
+      if(e.data && e.data.size){ VID.chunks.push(e.data); VID.recBytes+=e.data.size; }
+    };
+    VID.rec.onstop=function(){
+      if(VID.chunks.length){
+        VID.lastBlob=new Blob(VID.chunks,{type:VID.recMime.split(';')[0]});
+        var b=$('btn-vsave');
+        if(b){ b.style.display=''; b.textContent='💾 SALVA VIDEO ('+(VID.lastBlob.size/1048576).toFixed(1)+' MB)'; }
+      }
+      VID.chunks=[];
+    };
+    VID.rec.start(2000);   // chunk da 2 s: se Safari crolla si perde poco lavoro del recorder
+  } catch(e){ VID.rec=null; }
+}
+function recStop(){
+  try { if(VID.rec && VID.rec.state!=='inactive') VID.rec.stop(); } catch(e){}
+  VID.rec=null;
+}
+window.videoSave=function(){
+  if(!VID.lastBlob) return;
+  var ext=/mp4/.test(VID.recMime)? 'mp4':'webm';
+  var name='video_'+carName().replace(/[^a-z0-9]/gi,'-')+'_'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.'+ext;
+  try {
+    if(navigator.share && navigator.canShare && navigator.canShare({files:[new File([VID.lastBlob],name)]})){
+      navigator.share({files:[new File([VID.lastBlob],name,{type:VID.lastBlob.type})]}).catch(function(){});
+      return;
+    }
+  } catch(e){}
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(VID.lastBlob); a.download=name; a.click();
+};
+window.videoToggle=function(){
+  VID.want=!VID.want;
+  var b=$('btn-video'); if(b) b.textContent='🎥 VIDEO LIVE: '+(VID.want?'ON':'OFF');
+  avApply();
+};
+window.micToggle=function(){
+  VID.mic=!VID.mic;
+  var b=$('btn-mic'); if(b) b.textContent='🎙 MICROFONO: '+(VID.mic?'ON':'OFF');
+  avApply();
+};
+function avFlags(){
+  try { if(VID.rawStream) VID.rawStream.getVideoTracks().forEach(function(t){ t.enabled=!!VID.want; }); } catch(e){}
+  try { if(VID.rawStream) VID.rawStream.getAudioTracks().forEach(function(t){ t.enabled=!!VID.mic; }); } catch(e){}
+}
+/* ON/OFF senza mai rilasciare la camera: cosi' la riattivazione (anche
+   remota dal box) NON fa comparire richieste di consenso sul telefono. */
+function avApply(){
+  if(!VID.rawStream){
+    if(VID.want||VID.mic) videoStart();
+    else st('st-video','Audio/video spenti.');
+    return;
+  }
+  avFlags();
+  if(VID.mic){ try { if(VID.rawStream.getAudioTracks().length===0)
+    st('st-video','🎙 Microfono non autorizzato (consentilo dalle impostazioni del sito in Safari).','err'); } catch(e){} }
+  if(VID.want||VID.mic){
+    if(!VID.rec){ VID.lastBlob=null; var bv=$('btn-vsave'); if(bv) bv.style.display='none'; recStart(VID.stream); }
+    if(!VID.peer && !VID.call){ VID.lastLive=Date.now(); videoDial(); }
+    if(!VID.mon) VID.mon=setInterval(videoMonitor,(window._REP_VID_MON||10000));
+    st('st-video','🎛 '+avLabel()+' attivo — camera già autorizzata, nessun nuovo consenso.','ok');
+  } else {
+    recStop();
+    clearTimeout(VID.timer);
+    clearInterval(VID.mon); VID.mon=null;
+    try { VID.call&&VID.call.close(); } catch(e){}
+    try { VID.peer&&VID.peer.destroy(); } catch(e){}
+    VID.call=null; VID.peer=null;
+    st('st-video','⏸ In pausa — camera pronta: riattivabile anche dal box, senza consenso.');
+  }
+}
+function avRestart(){
+  videoStop('');
+  if(VID.want||VID.mic) videoStart();
+  else st('st-video','Audio/video spenti.');
+}
+function avLabel(){ return VID.want&&VID.mic? 'audio+video' : (VID.want? 'video':'audio'); }
+function videoDial(){
+  var code=(TX.code||$('code').value.trim().toLowerCase());
+  if(code.length<4 || !VID.stream) return;
+  ensurePeer(function(){
+   repIce(function(ice){
+    try { VID.peer=new Peer(ice? {debug:0, config:ice} : {debug:0}); }
+    catch(e){ st('st-video','Errore video: '+e.message,'err'); return; }
+    VID.peer.on('open',function(){
+      try {
+        VID.call=VID.peer.call('reptel-'+code, VID.stream, { metadata:{ c:carName(), hasV:VID.want?1:0, hasA:VID.mic?1:0 } });
+        clearTimeout(VID.timer);
+        VID.timer=setTimeout(function(){
+          st('st-video','⚠️ Live non disponibile su questa rete — la REC locale continua, ritento da solo.','err');
+        },15000);
+        if(VID.call){
+          VID.call.on('close',function(){});
+          VID.call.on('error',function(){});
+          VID.call.on('stream',function(){});
+          VID.peer.on('iceStateChanged',function(state){
+            if(state==='connected'||state==='completed'){ VID.lastLive=Date.now(); clearTimeout(VID.timer); st('st-video','📡 '+avLabel()+' in onda verso il box · REC locale attiva.','ok'); }
+          });
+          setTimeout(function(){
+            if((VID.want||VID.mic) && VID.peer && !VID.peer.destroyed){ clearTimeout(VID.timer); st('st-video','📡 '+avLabel()+' inviato al box · REC locale attiva ('+((VID.recBytes||0)/1048576).toFixed(1)+' MB).','ok'); }
+          },6000);
+        }
+      } catch(e){ st('st-video','Errore chiamata video: '+e.message,'err'); }
+    });
+    VID.peer.on('error',function(err){ st('st-video','Video: '+errMsg(err.type||err.message)+' — ritento da solo.','err'); });
+   });
+  },function(){ st('st-video','PeerJS non caricabile.','err'); });
+}
+/* GUARDIANO VIDEO: se il canale media muore (rete caduta, box
+   ricostruito), richiama da solo. Camera, overlay e REC locale
+   non vengono toccati: si ricrea solo il tratto di rete. */
+function videoMonitor(){
+  if(!(VID.want||VID.mic) || !VID.stream) return;
+  var now=Date.now(), bad=false;
+  if(!VID.peer || VID.peer.destroyed) bad=true;
+  else if(VID.peer.disconnected){ try { VID.peer.reconnect(); } catch(e){ bad=true; } }
+  var pc=VID.call && VID.call.peerConnection;
+  if(pc){
+    var ics=pc.iceConnectionState;
+    if(ics==='connected'||ics==='completed') VID.lastLive=now;
+    if(ics==='failed'||ics==='closed'||ics==='disconnected') bad=true;
+  } else if(VID.peer && !VID.peer.destroyed && !VID.call) bad=true;
+  /* chiamata "appesa": esiste ma non si e' mai connessa (es. box appena
+     ricostruito, id non ancora registrato) — nessun evento la segnala.
+     Se non da' segni di vita da troppo tempo, si rifa' da capo. */
+  if(!bad && now-(VID.lastLive||0) > (window._REP_VID_DEAD||30000)) bad=true;
+  if(bad){
+    VID.lastLive=now;
+    st('st-video','🔁 Riaggancio il canale '+avLabel()+' al box…');
+    try { if(VID.call) VID.call.close(); } catch(e){}
+    try { if(VID.peer) VID.peer.destroy(); } catch(e){}
+    VID.call=null; VID.peer=null;
+    videoDial();
+  }
+}
+function videoStart(){
+  var code=(TX.code||$('code').value.trim().toLowerCase());
+  if(code.length<4){ st('st-video','Prima inserisci il codice del box.','err'); VID.want=false; $('btn-video').textContent='🎥 VIDEO LIVE: OFF'; return; }
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){ st('st-video','Camera non disponibile in questo browser.','err'); return; }
+  st('st-video','Avvio camera…');
+  /* chiede SEMPRE camera+microfono insieme: UN SOLO consenso a inizio
+     giornata. Da qui in poi ON/OFF (anche dal telecomando del box) sono
+     solo pausa/ripresa delle tracce: nessuna nuova richiesta sul telefono. */
+  var vc={ facingMode:'environment',
+    width:{ideal: VID.portrait? 360:640}, height:{ideal: VID.portrait? 640:360},
+    frameRate:{ideal:15,max:15} };
+  /* microfono e camera in DUE richieste separate: se il microfono viene
+     negato, la camera resta comunque autorizzata e il video funziona.
+     (una richiesta combinata negata boccerebbe tutto, camera compresa) */
+  navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true }, video:false })
+  .catch(function(){ return null; })
+  .then(function(as){
+    return navigator.mediaDevices.getUserMedia({ audio:false, video:vc })
+      .then(function(vs){
+        if(as){ try { as.getAudioTracks().forEach(function(t){ vs.addTrack(t); }); } catch(e){} }
+        else if(VID.mic) st('st-video','🎙 Microfono non autorizzato: il video parte comunque.','err');
+        return vs;
+      });
+  })
+  .then(function(stream){
+    if(!VID.want && !VID.mic){ stream.getTracks().forEach(function(t){t.stop();}); return; }
+    VID.rawStream=stream;
+    avFlags();
+    VID.stream=overlayPipeline(stream);
+    VID.lastBlob=null; var bv=$('btn-vsave'); if(bv) bv.style.display='none';
+    recStart(VID.stream);
+    st('st-video','Sorgente ok — collego '+avLabel()+' al box…');
+    VID.lastLive=Date.now();
+    videoDial();
+    clearInterval(VID.mon);
+    VID.mon=setInterval(videoMonitor,(window._REP_VID_MON||10000));
+  })
+  .catch(function(err){
+    st('st-video','Permesso camera/microfono negato o errore: '+err.message,'err');
+    VID.want=false; VID.mic=false;
+    $('btn-video').textContent='🎥 VIDEO LIVE: OFF';
+    $('btn-mic').textContent='🎙 MICROFONO: OFF';
+  });
+}
+function videoStop(msg){
+  clearTimeout(VID.timer);
+  clearInterval(VID.mon); VID.mon=null;
+  recStop();
+  clearInterval(VID.drawTimer); VID.drawTimer=null;
+  try { if(VID.rawStream) VID.rawStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+  VID.rawStream=null; VID.cam=null; VID.canvas=null; VID.ctx=null;
+  try { if(VID.stream) VID.stream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+  try { if(VID.call) VID.call.close(); } catch(e){}
+  try { if(VID.peer) VID.peer.destroy(); } catch(e){}
+  VID.stream=null; VID.call=null; VID.peer=null;
+  st('st-video', msg||'');
+}
+/* ── SENSORI DI MOVIMENTO: g laterale/longitudinale ──
+   Il telefono è montato con orientamento qualsiasi:
+   1) la gravità (giù) si stima in continuo con un passa-basso su
+      accelerationIncludingGravity;
+   2) l'accelerazione lineare si proietta sul piano orizzontale;
+   3) l'asse "avanti" si impara da solo alla prima frenata/accelerazione
+      netta (>1.2 m/s² dal GPS): in quell'istante l'accelerazione
+      orizzontale È la direzione di marcia (col segno di dv);
+   4) laterale = giù × avanti. Tutto in g. */
+var MOT={ on:false, g:[0,0,-9.81], f:null, glat:0, glong:0, pLat:0, pLong:0, dvdt:0, lastSend:0, calib:false, ev:0, lastEvT:0, vF:0, lastUi:0, skipped:0 };
+/* ── GIRI: il traguardo si auto-rileva. Primo fix GPS in movimento
+      (>30 km/h) = linea; ogni ripassaggio entro 25 m, con giro minimo
+      di 30 s, chiude il giro. ── */
+var LAPS={ startPt:null, lapStartT:0, last:null, best:null, count:0 };
+function lapsReset(){ LAPS.startPt=null; LAPS.lapStartT=0; LAPS.last=null; LAPS.best=null; LAPS.count=0; }
+function lapsUpdate(p){
+  if(!LAPS.startPt){
+    if(p.v!=null && p.v*3.6>30){ LAPS.startPt={lat:p.lat,lon:p.lon}; LAPS.lapStartT=p.t; }
+    return;
+  }
+  if(p.t-LAPS.lapStartT>30000 && hav(p.lat,p.lon,LAPS.startPt.lat,LAPS.startPt.lon)<25){
+    LAPS.last=p.t-LAPS.lapStartT;
+    if(LAPS.best==null || LAPS.last<LAPS.best) LAPS.best=LAPS.last;
+    LAPS.count++;
+    LAPS.lapStartT=p.t;
+  }
+}
+function fmtLap(ms){
+  if(ms==null) return '--:--.-';
+  var m=Math.floor(ms/60000), sct=(ms%60000)/1000;
+  return m+':'+(sct<10?'0':'')+sct.toFixed(1);
+}
+var IMPACT={ thr:4.0, lastT:0 };
+function impactCheck(ax,ay,az){
+  /* urto: modulo dell'accelerazione lineare grezza (60Hz, prima di ogni
+     filtro) sopra la soglia. Debounce 10 s per non mitragliare il box. */
+  var g=Math.sqrt(ax*ax+ay*ay+az*az)/9.81;
+  if(g<IMPACT.thr) return;
+  var now=Date.now();
+  if(now-IMPACT.lastT<10000) return;
+  IMPACT.lastT=now;
+  var lp=REC.pts.length? REC.pts[REC.pts.length-1] : null;
+  var pkt={ k:'alert', g:+g.toFixed(1), t:now,
+            a:lp? lp.lat:null, o:lp? lp.lon:null, v:(lp&&lp.v!=null)? +(lp.v*3.6).toFixed(0):null };
+  // invio prioritario, con ritentativi: e' l'unico pacchetto che conta davvero
+  var tries=0;
+  (function send(){ if(txSend(pkt)||++tries>=3) return; setTimeout(send,700); })();
+  st('st-gps','⚠️ URTO RILEVATO '+g.toFixed(1)+' g — segnalato al box.','err');
+}
+function motStart(){
+  function attach(){
+    try{ window.removeEventListener('devicemotion', onMotion); }catch(e){}
+    window.addEventListener('devicemotion', onMotion);
+    MOT.on=true; MOT.f=null; MOT.calib=false; MOT.pLat=0; MOT.pLong=0; MOT.ev=0; MOT.vF=0;
+    setTimeout(function(){
+      if(MOT.ev===0 && REC.id!==null){
+        $('glat').textContent='OFF'; $('glong').textContent='OFF';
+        st('st-gps','Sensori fermi: premi ⟳ SENSORI (e consenti il movimento).','err');
+        motBtn(true);
+      }
+    },2500);
+  }
+  if(typeof DeviceMotionEvent==='undefined'){ st('st-gps','Sensori di movimento non supportati: solo GPS.'); return; }
+  if(DeviceMotionEvent.requestPermission){
+    DeviceMotionEvent.requestPermission().then(function(r){
+      if(r==='granted'){ motBtn(false); attach(); }
+      else { st('st-gps','Permesso movimento negato: premi ⟳ SENSORI per riprovare.','err'); motBtn(true); }
+    }).catch(function(){ st('st-gps','Serve un tocco per attivare i sensori: premi ⟳ SENSORI.','err'); motBtn(true); });
+  } else { motBtn(false); attach(); }
+}
+function motBtn(show){
+  var b=$('btn-mot');
+  if(!b){
+    var stop=$('btn-stop');
+    stop.insertAdjacentHTML('afterend','<button class="b-gray big" id="btn-mot" style="display:none" onclick="motStart()">⟳ SENSORI</button>');
+    b=$('btn-mot');
+  }
+  b.style.display=show?'':'none';
+}
+function motStop(){ if(MOT.on){ try{ window.removeEventListener('devicemotion', onMotion); }catch(e){} MOT.on=false; } }
+function onMotion(e){
+  var gi=e.accelerationIncludingGravity;
+  if(!gi || gi.x==null) return;
+  MOT.ev++;
+  var nowT=Date.now();
+  var dtE=Math.min(0.1, MOT.lastEvT? (nowT-MOT.lastEvT)/1000 : 0.02);
+  MOT.lastEvT=nowT;
+  var al=0.02;
+  MOT.g[0]+=al*(gi.x-MOT.g[0]); MOT.g[1]+=al*(gi.y-MOT.g[1]); MOT.g[2]+=al*(gi.z-MOT.g[2]);
+  var a=e.acceleration, ax,ay,az;
+  if(a && a.x!=null){ ax=a.x; ay=a.y; az=a.z; }
+  else { ax=gi.x-MOT.g[0]; ay=gi.y-MOT.g[1]; az=gi.z-MOT.g[2]; }
+  if(REC.id!==null) impactCheck(ax,ay,az);
+  var gn=Math.sqrt(MOT.g[0]*MOT.g[0]+MOT.g[1]*MOT.g[1]+MOT.g[2]*MOT.g[2])||9.81;
+  var gx=MOT.g[0]/gn, gy=MOT.g[1]/gn, gz=MOT.g[2]/gn;
+  var dot=ax*gx+ay*gy+az*gz;
+  var hx=ax-dot*gx, hy=ay-dot*gy, hz=az-dot*gz;
+  // calibrazione asse avanti (soglie basse: basta una frenata decisa)
+  if(Math.abs(MOT.dvdt)>0.8){
+    var m=Math.sqrt(hx*hx+hy*hy+hz*hz);
+    if(m>0.5){
+      var sg=MOT.dvdt>0?1:-1;
+      var fx=sg*hx/m, fy=sg*hy/m, fz=sg*hz/m;
+      if(!MOT.f) MOT.f=[fx,fy,fz];
+      else {
+        MOT.f[0]=MOT.f[0]*0.9+fx*0.1; MOT.f[1]=MOT.f[1]*0.9+fy*0.1; MOT.f[2]=MOT.f[2]*0.9+fz*0.1;
+        var fn=Math.sqrt(MOT.f[0]*MOT.f[0]+MOT.f[1]*MOT.f[1]+MOT.f[2]*MOT.f[2])||1;
+        MOT.f[0]/=fn; MOT.f[1]/=fn; MOT.f[2]/=fn;
+      }
+      if(!MOT.calib){ MOT.calib=true; st('st-gps','Assi calibrati: g attive.'); }
+    }
+  }
+  if(MOT.f){
+    var f=MOT.f;
+    var lonG=(hx*f[0]+hy*f[1]+hz*f[2])/9.81;
+    var lx=gy*f[2]-gz*f[1], ly=gz*f[0]-gx*f[2], lz=gx*f[1]-gy*f[0];
+    var latG=(hx*lx+hy*ly+hz*lz)/9.81;
+    MOT.glat+=0.25*(latG-MOT.glat);
+    MOT.glong+=0.25*(lonG-MOT.glong);
+    MOT.pLat=Math.max(MOT.pLat,Math.abs(MOT.glat));
+    MOT.pLong=Math.max(MOT.pLong,Math.abs(MOT.glong));
+    // fusione velocita': integra la g longitudinale, il GPS riaggancia a ogni fix
+    MOT.vF=Math.max(0, MOT.vF + lonG*9.81*dtE);
+    $('glat').textContent=MOT.glat.toFixed(2);
+    $('glong').textContent=MOT.glong.toFixed(2);
+    $('glatmax').textContent=MOT.pLat.toFixed(2);
+    var now=Date.now();
+    if(now-MOT.lastUi>=200 && REC.id!==null){ MOT.lastUi=now; $('v').textContent=Math.round(MOT.vF*3.6); }
+    if(now-MOT.lastSend>=200 && TX.on){
+      MOT.lastSend=now;
+      txSend({k:'g', x:+MOT.glat.toFixed(3), y:+MOT.glong.toFixed(3), vf:+(MOT.vF*3.6).toFixed(1), t:now});
+    }
+  } else if(REC.id!==null){
+    var hMag=Math.sqrt(hx*hx+hy*hy+hz*hz)/9.81;
+    $('glat').textContent='cal '+hMag.toFixed(2);
+    $('glong').textContent='cal…';
+    var nw=Date.now();
+    if(nw-MOT.lastUi>=1000){ MOT.lastUi=nw;
+      st('st-gps','Sensori attivi — assi in calibrazione: una frenata o accelerazione decisa e partono le g.');
+    }
+  }
+  MOT.dvdt*=0.95;   // il dato GPS invecchia: senza decadimento una curva
+                    // lunga ruoterebbe l'asse avanti calibrato
+}
+/* ── ARCHIVIO REGISTRAZIONI: si salvano da sole allo STOP e si possono
+      inviare al box in un secondo momento (in PS spesso non c'e' rete). ── */
+var SESS_KEY='reptx_sess_v1';
+var DRAFT_KEY='reptx_draft_v1';
+function draftSave(){
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      t0:REC.t0, dist:+(REC.dist/1000).toFixed(2), vmax:+(REC.vmax*3.6).toFixed(0),
+      pts:REC.pts.map(function(p){ return [ +p.lat.toFixed(6), +p.lon.toFixed(6), +(+p.alt).toFixed(1),
+        (p.v!==null? +(p.v*3.6).toFixed(1):null), p.t-REC.t0, (p.gx!=null?p.gx:null), (p.gy!=null?p.gy:null) ]; })
+    }));
+  } catch(e){}
+}
+window.sessRecover=function(){
+  try {
+    var d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null');
+    if(!d || !d.pts || d.pts.length<10){ localStorage.removeItem(DRAFT_KEY); return; }
+    var list=sessAll();
+    list.push({ name:'GPS '+new Date(d.t0).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' (recuperata)',
+                dist:d.dist, vmax:d.vmax, pts:d.pts });
+    sessSave(list); localStorage.removeItem(DRAFT_KEY); sessRender();
+    st('st-sess','♻ Registrazione interrotta recuperata dall\'ultima bozza.','ok');
+  } catch(e){}
+};
+function sessAll(){ try{ return JSON.parse(localStorage.getItem(SESS_KEY)||'[]'); }catch(e){ return []; } }
+function sessSave(list){
+  try {
+    var j=JSON.stringify(list);
+    while(j.length>3500000 && list.length>1){ list.shift(); j=JSON.stringify(list); }
+    localStorage.setItem(SESS_KEY,j);
+  } catch(e){ try{ list.shift(); localStorage.setItem(SESS_KEY,JSON.stringify(list)); }catch(e2){} }
+}
+function sessStore(){
+  if(REC.pts.length<10) return;
+  var list=sessAll();
+  list.push({
+    name:'GPS '+new Date().toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),
+    dist:+(REC.dist/1000).toFixed(2), vmax:+(REC.vmax*3.6).toFixed(0),
+    pts:REC.pts.map(function(p){ return [ +p.lat.toFixed(6), +p.lon.toFixed(6), +(+p.alt).toFixed(1),
+      (p.v!==null? +(p.v*3.6).toFixed(1):null), p.t-REC.t0, (p.gx!=null?p.gx:null), (p.gy!=null?p.gy:null) ]; })
+  });
+  sessSave(list); sessRender();
+}
+function sessRender(){
+  var list=sessAll(), card=$('tx-sess-card'), out=$('tx-sess-list');
+  if(!card||!out) return;
+  card.style.display=list.length?'':'none';
+  out.innerHTML=list.map(function(sx,i){
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">'+sx.name+'</div>'+
+      '<div style="font-size:11px;color:var(--dim)">'+sx.dist+' km · Vmax '+sx.vmax+' · '+sx.pts.length+' punti</div></div>'+
+      '<button class="b-blue" style="padding:9px 12px;font-size:12px" onclick="sessSend('+i+')">📤</button>'+
+      '<button class="b-gray" style="padding:9px 12px;font-size:12px" onclick="sessCsv('+i+')">⬇</button>'+
+      '<button class="b-gray" style="padding:9px 12px;font-size:12px" onclick="sessDel('+i+')">🗑</button></div>';
+  }).join('');
+}
+window.sessDel=function(i){ var l=sessAll(); l.splice(i,1); sessSave(l); sessRender(); };
+window.sessCsv=function(i){
+  var sx=sessAll()[i]; if(!sx) return;
+  var csv='lat,lon,alt,speed_kmh,t_ms,glat_g,glong_g\n'+sx.pts.map(function(r){
+    return r[0]+','+r[1]+','+r[2]+','+(r[3]!=null?r[3]:'')+','+r[4]+','+(r[5]!=null?r[5]:'')+','+(r[6]!=null?r[6]:'');
+  }).join('\n');
+  var name=sx.name.replace(/[\/:, ]+/g,'-')+'.csv';
+  var blob=new Blob([csv],{type:'text/csv'});
+  if(navigator.share&&navigator.canShare&&navigator.canShare({files:[new File([blob],name)]})){
+    navigator.share({files:[new File([blob],name,{type:'text/csv'})]}).catch(function(){});
+  } else { var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
+};
+window.sessSend=function(i){
+  var sx=sessAll()[i]; if(!sx) return;
+  if(!TX.on){ st('st-sess','Prima collegati al box (codice + CONNETTI), poi 📤.','err'); return; }
+  var CH=400, total=Math.ceil(sx.pts.length/CH), part=0;
+  st('st-sess','Invio "'+sx.name+'"…');
+  (function nextPart(){
+    if(part>=total){ st('st-sess','✅ "'+sx.name+'" inviata al box ('+sx.pts.length+' punti).','ok'); return; }
+    var ok=txSend({ k:'hist', name:sx.name, part:part, total:total,
+                    pts:sx.pts.slice(part*CH,(part+1)*CH), dist:sx.dist, vmax:sx.vmax });
+    if(!ok){ st('st-sess','Invio interrotto: connessione persa.','err'); return; }
+    part++;
+    st('st-sess','Invio "'+sx.name+'"… '+Math.round(part/total*100)+'%');
+    setTimeout(nextPart, 80);
+  })();
+};
+document.addEventListener('DOMContentLoaded', function(){
+  try{ var nm=localStorage.getItem('reptx_name'); if(nm&&$('carname')) $('carname').value=nm; }catch(e){}
+  try{ if(localStorage.getItem('reptx_portrait')==='1'){ VID.portrait=true;
+    var bf=$('btn-fmt'); if(bf) bf.textContent='📐 FORMATO: VERTICALE'; } }catch(e){}
+  sessRender(); sessRecover();
+});
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible'&&REC.id!==null&&navigator.wakeLock&&navigator.wakeLock.request){
+    navigator.wakeLock.request('screen').then(function(wl){ wakeLock=wl; }).catch(function(){});
+  }
+});
+</script>
+</body>
+</html>
