@@ -44,10 +44,13 @@ button:disabled{ opacity:.35; }
 .foot{ font-size:11px; color:var(--dim); text-align:center; line-height:1.6; }
 @media (prefers-reduced-motion:reduce){ button{ transition:none; } }
 </style>
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.svg">
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("./service-worker.js").catch(function(){});});}</script>
 </head>
 <body>
 <div class="wrap">
-  <h1>📡 REP TELEMETRIA <small>trasmettitore v4.6</small></h1>
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.1</small></h1>
 
   <div class="card">
     <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
@@ -60,6 +63,7 @@ button:disabled{ opacity:.35; }
       <button class="b-blue" id="btn-conn" onclick="doConnect()">CONNETTI</button>
     </div>
     <div class="status" id="st-conn" style="margin-top:8px">Inserisci il codice mostrato sul PC box (📍 GPS logger → RICEZIONE BOX).</div>
+    <div class="status" id="st-link" style="margin-top:4px;display:none"></div>
   </div>
 
   <div class="card">
@@ -82,6 +86,8 @@ button:disabled{ opacity:.35; }
   <button class="b-gray big" id="btn-csv" onclick="doExport()" disabled>⬇ SCARICA CSV</button>
   <button class="b-gray big" id="btn-video" onclick="videoToggle()">🎥 VIDEO LIVE: OFF</button>
   <button class="b-gray big" id="btn-mic" onclick="micToggle()">🎙 MICROFONO: OFF</button>
+  <button class="b-gray big" id="btn-stage" onclick="stagePanel()">🏁 PROVA / SPECIALE</button>
+  <button class="b-gray big" id="btn-leg" onclick="legToggle()">🚗 TRASFERIMENTO (tocca per PS)</button>
   <button class="b-gray big" id="btn-scan" onclick="scanToggle()">📷 SCAN CODICI: OFF</button>
   <button class="b-gray big" id="btn-fmt" onclick="fmtToggle()">📐 FORMATO: ORIZZONTALE</button>
   <button class="b-gray big" onclick="lockScreen()">🔒 BLOCCA SCHERMO</button>
@@ -429,6 +435,8 @@ window.doStart=function(){
     }
     if(p.v!==null) MOT.vF=p.v;           // il fix GPS (Doppler) riaggancia la velocita' fusa
     lapsUpdate(p);
+    try { stageUpdate(p); } catch(eS){}
+    try { legUpdate(p); } catch(eL){}
     if(REC.pts.length%20===0 && REC.pts.length>0) draftSave();   // bozza anti-crash
     if(last && p.v!==null && last.v!==null){
       var dtv=(p.t-last.t)/1000;
@@ -437,7 +445,7 @@ window.doStart=function(){
     p.gx=+MOT.glat.toFixed(3); p.gy=+MOT.glong.toFixed(3);
     REC.pts.push(p);
     if(p.v!==null) REC.vmax=Math.max(REC.vmax,p.v);
-    if(TX.on && txSend({k:'p',a:p.lat,o:p.lon,h:p.alt,v:p.v,t:p.t,q:p.q})) REC.sent++;
+    txPunto({k:'p',a:p.lat,o:p.lon,h:p.alt,v:p.v,t:p.t,q:p.q});
     $('v').textContent = p.v!==null? Math.round(p.v*3.6) : '—';
     $('vmax').textContent = Math.round(REC.vmax*3.6);
     $('dist').textContent = (REC.dist/1000).toFixed(2);
@@ -489,6 +497,7 @@ window.lockScreen=function(){
     '<div style="font-size:12px;color:var(--dim);letter-spacing:.1em">KM/H</div>'+
     '<div id="lock-delta" style="font-size:44px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1"></div>'+
     '<div id="lock-lap" style="font-size:14px;color:var(--dim)"></div>'+
+    '<div id="lock-co" style="font-size:13px;color:#8a90a0"></div>'+
     '<div id="lock-info" class="status" style="text-align:center;font-size:15px"></div>'+
     '<div style="width:70%;max-width:260px;height:10px;background:var(--bg3);border-radius:5px;overflow:hidden">'+
     '<div id="lock-bar" style="height:100%;width:0%;background:var(--green)"></div></div>'+
@@ -521,10 +530,16 @@ window.lockScreen=function(){
   dv.addEventListener('contextmenu',function(e){ e.preventDefault(); });
   LOCK.ui=setInterval(function(){
     var lv=$('lock-v'); if(lv) lv.textContent=$('v').textContent;
+    var inStage=(STG.state==='run');
+    var dShow=inStage? STG.lastDelta : LAPS.delta;
     var ldl=$('lock-delta');
-    if(ldl){ ldl.textContent=fmtDelta(LAPS.delta); ldl.style.color=(LAPS.delta!=null&&LAPS.delta<0)?'#32d74b':'#ff453a'; }
+    if(ldl){ ldl.textContent=fmtDelta(dShow); ldl.style.color=(dShow!=null&&dShow<0)?'#32d74b':'#ff453a'; }
+    try { coTick(); } catch(e){}
     var llp=$('lock-lap');
-    if(llp) llp.textContent=LAPS.count? ('L'+(LAPS.count+1)+' · ultimo '+fmtLap(LAPS.last)+' · best '+fmtLap(LAPS.best)):'';
+    if(llp){
+      if(inStage) llp.textContent='🏁 '+STG.cur.name+' · '+fmtLap(Date.now()-STG.t0)+' · '+(STG.dist/1000).toFixed(2)+' km'+(STG.cur.best!=null? ' · rif '+fmtLap(STG.cur.best):'');
+      else llp.textContent=LAPS.count? ('L'+(LAPS.count+1)+' · ultimo '+fmtLap(LAPS.last)+' · best '+fmtLap(LAPS.best)):'';
+    }
     var li=$('lock-info');
     if(li){
       var parts=[];
@@ -1132,6 +1147,361 @@ function lapsUpdate(p){
     lapClose(tCross,p.v);
   }
 }
+/* ═══ TABELLA DI MARCIA: orario del prossimo controllo, km mancanti,
+   media necessaria e avviso ritardo ═══ */
+var CO={ hhmm:null, km:null, warned:false };
+window.coSet=function(){
+  var h=prompt('Orario del prossimo controllo (CO) — formato HH:MM', CO.hhmm||'');
+  if(h===null) return;
+  h=String(h).trim();
+  if(h===''){ CO.hhmm=null; CO.km=null; try{localStorage.removeItem('reptx_co');}catch(e){} st('st-gps','Controllo orario disattivato.'); coRefresh(); return; }
+  if(!/^\d{1,2}[:.]\d{2}$/.test(h)){ st('st-gps','Orario non valido (usa HH:MM).','err'); return; }
+  var k=prompt('Chilometri da percorrere fino al CO (0 = usa solo l\'orario)', CO.km!=null? String(CO.km):'');
+  if(k===null) return;
+  CO.hhmm=h.replace('.',':');
+  CO.km=parseFloat(String(k).replace(',','.'))||0;
+  CO.warned=false;
+  try { localStorage.setItem('reptx_co', JSON.stringify({hhmm:CO.hhmm,km:CO.km})); } catch(e){}
+  st('st-gps','⏰ Prossimo CO alle '+CO.hhmm+(CO.km?(' · '+CO.km+' km'):''),'ok');
+  coRefresh();
+};
+function coLoad(){ try { var o=JSON.parse(localStorage.getItem('reptx_co')||'{}'); CO.hhmm=o.hhmm||null; CO.km=(o.km!=null?+o.km:null); } catch(e){} }
+function coMinsLeft(){
+  if(!CO.hhmm) return null;
+  var pp=CO.hhmm.split(':'), now=new Date();
+  var tgt=new Date(now.getFullYear(),now.getMonth(),now.getDate(),+pp[0],+pp[1],0);
+  var dm=(tgt-now)/60000;
+  if(dm<-720) dm+=1440;
+  return dm;
+}
+function coState(){
+  var m=coMinsLeft(); if(m==null) return null;
+  var kmLeft=(CO.km||0) - ((LEG.mode!=='ps')? LEG.km/1000 : 0);
+  if(kmLeft<0) kmLeft=0;
+  var need=(m>0.5 && kmLeft>0)? (kmLeft/(m/60)) : null;
+  return { min:m, km:kmLeft, need:need };
+}
+function coRefresh(){
+  var e=$('stg-co'); if(!e) return;
+  var c=coState();
+  if(!c){ e.innerHTML='<b>⏰ CONTROLLO ORARIO</b><br><span style="opacity:.6">non impostato</span>'; return; }
+  e.innerHTML='<b>⏰ CO alle '+CO.hhmm+'</b><br>'+
+    (c.min<0? '<span style="color:#ff453a;font-weight:700">IN RITARDO di '+Math.abs(c.min).toFixed(0)+' min</span>'
+            : 'mancano <b>'+c.min.toFixed(0)+' min</b>')+
+    (c.km>0? ' · <b>'+c.km.toFixed(1)+' km</b>':'')+
+    (c.need!=null? '<br>media necessaria: <b style="color:'+(c.need>90?'#ff453a':(c.need>70?'#ffd60a':'#32d74b'))+'">'+c.need.toFixed(0)+' km/h</b>':'');
+}
+function coTick(){
+  var c=coState(); if(!c) return;
+  var e=$('lock-co');
+  if(e){
+    e.textContent=(c.min<0? '⏰ CO IN RITARDO '+Math.abs(c.min).toFixed(0)+" min"
+                          : '⏰ CO '+CO.hhmm+' · '+c.min.toFixed(0)+" min"+(c.km>0? ' · '+c.km.toFixed(1)+' km':'')+
+                            (c.need!=null? ' · '+c.need.toFixed(0)+' km/h':''));
+    e.style.color=(c.min<0)? '#ff453a' : (c.need!=null&&c.need>90? '#ffd60a':'#8a90a0');
+  }
+  coRefresh();
+  if(!CO.warned && c.need!=null && c.need>85){
+    CO.warned=true;
+    st('st-gps','⏰ Attenzione: per il CO delle '+CO.hhmm+' serve una media di '+c.need.toFixed(0)+' km/h','err');
+    try { txSend({k:'co', hhmm:CO.hhmm, min:Math.round(c.min), km:+c.km.toFixed(1), need:Math.round(c.need)}); } catch(e){}
+  }
+}
+/* ═══ CONTACHILOMETRI PS / TRASFERIMENTO: misura da solo i km di ogni
+   tratto e li manda al box, che compila il piano carburante e la lista
+   prove speciali senza che nessuno scriva niente. ═══ */
+var LEG={ mode:'tf', km:0, t0:0, name:'', n:0, totPS:0, totTF:0, prevP:null, tyre:'' };
+window.tyreSet=function(){
+  var t=prompt('Treno gomme montato (es. SET A, SLICK 2, PIOGGIA):', LEG.tyre||'');
+  if(t===null) return;
+  LEG.tyre=String(t).trim().toUpperCase();
+  try { localStorage.setItem('reptx_tyre', LEG.tyre); } catch(e){}
+  st('st-gps', LEG.tyre? ('🛞 Treno attivo: '+LEG.tyre+' — i km si sommano a questo set'):'Treno gomme non impostato.','ok');
+  stagePanelRefresh();
+};
+function legLabel(){ return LEG.mode==='ps'? ('🚦 PS'+(LEG.name? ' '+LEG.name:'')+' — tocca per TRASFERIMENTO')
+                                           : '🚗 TRASFERIMENTO (tocca per PS)'; }
+function legBtn(){ var b=$('btn-leg'); if(b){ b.textContent=legLabel(); b.className='b-'+(LEG.mode==='ps'?'green':'gray')+' big'; } }
+function legClose(auto){
+  if(LEG.km<50){ LEG.km=0; LEG.t0=Date.now(); return; }   // tratto troppo corto: ignora
+  var dur=Date.now()-LEG.t0;
+  if(LEG.mode==='ps'){ LEG.n++; LEG.totPS+=LEG.km; } else LEG.totTF+=LEG.km;
+  try { txSend({ k:'leg', type:LEG.mode, name:(LEG.mode==='ps'? (LEG.name||('PS'+LEG.n)):''),
+    n:LEG.n, km:+(LEG.km/1000).toFixed(2), t:Math.round(dur), tyre:LEG.tyre||'',
+    totPS:+(LEG.totPS/1000).toFixed(2), totTF:+(LEG.totTF/1000).toFixed(2) }); } catch(e){}
+  st('st-gps',(LEG.mode==='ps'?'🚦 PS':'🚗 Trasferimento')+' chiuso: '+(LEG.km/1000).toFixed(2)+' km'+
+     (auto?' (automatico)':'')+' · totali PS '+(LEG.totPS/1000).toFixed(1)+' km · trasf. '+(LEG.totTF/1000).toFixed(1)+' km','ok');
+  LEG.km=0; LEG.t0=Date.now();
+}
+function legSet(mode,name,auto){
+  if(LEG.mode===mode && !name) return;
+  legClose(auto);
+  LEG.mode=mode; LEG.name=name||'';
+  legBtn(); legSave();
+}
+window.legToggle=function(){ legSet(LEG.mode==='ps'?'tf':'ps', '', false); };
+function legSave(){ try { localStorage.setItem('reptx_leg', JSON.stringify({totPS:LEG.totPS,totTF:LEG.totTF,n:LEG.n})); } catch(e){} }
+function legLoad(){ try { var o=JSON.parse(localStorage.getItem('reptx_leg')||'{}');
+  LEG.totPS=+o.totPS||0; LEG.totTF=+o.totTF||0; LEG.n=+o.n||0; } catch(e){} }
+window.legReset=function(){
+  if(!confirm('Azzerare i totali km di giornata (PS e trasferimenti)?')) return;
+  LEG.totPS=0; LEG.totTF=0; LEG.n=0; LEG.km=0; legSave();
+  try { txSend({k:'leg', type:'reset'}); } catch(e){}
+  st('st-gps','Totali km azzerati.','ok'); legBtn();
+};
+function legUpdate(p){
+  var prev=LEG.prevP; LEG.prevP=p;
+  if(!LEG.t0) LEG.t0=p.t;
+  if(prev) LEG.km+=hav(prev.lat,prev.lon,p.lat,p.lon);
+}
+/* ═══ PROVA / SPECIALE (rally split): partenza e arrivo memorizzati sul
+   GPS, split intermedi, delta per segmento contro la prova di
+   riferimento. Quando torni sullo stesso punto la prova si riconosce
+   da sola e il cronometro parte al passaggio. ═══ */
+var STG={ list:{}, cur:null, state:'idle', t0:0, dist:0, prevP:null,
+          samples:[], splitIdx:0, splitTimes:[], lastDelta:null, armedMsg:0 };
+function stgLoad(){ try { STG.list=JSON.parse(localStorage.getItem('reptx_stages')||'{}'); } catch(e){ STG.list={}; } }
+function stgSave(){ try { localStorage.setItem('reptx_stages', JSON.stringify(STG.list)); } catch(e){} }
+function stgLastPt(){ return REC.pts.length? REC.pts[REC.pts.length-1] : null; }
+window.stageSetStart=function(){
+  var p=stgLastPt();
+  if(!p){ st('st-gps','Attendi il segnale GPS (premi START).','err'); return; }
+  var nm=(prompt('Nome della prova:', (STG.cur&&STG.cur.name)||'PROVA 1')||'').trim().toUpperCase();
+  if(!nm) return;
+  stgLoad();
+  var prev=STG.list[nm]||{};
+  var brg=null;
+  if(REC.pts.length>1){ var q=REC.pts[REC.pts.length-2]; brg=bearing(q,p); }
+  STG.list[nm]={ name:nm, start:{lat:p.lat,lon:p.lon,brg:brg}, finish:prev.finish||null,
+                 splits:prev.splits||[], ref:prev.ref||null, best:prev.best||null, runs:prev.runs||[] };
+  STG.cur=STG.list[nm]; stgSave();
+  STG.state='armed';
+  st('st-gps','🏁 PARTENZA di "'+nm+'" memorizzata. Ora vai all\'arrivo e premi SEGNA ARRIVO.','ok');
+  stagePanelRefresh();
+};
+window.stageSetFinish=function(){
+  var p=stgLastPt();
+  if(!p||!STG.cur){ st('st-gps','Prima segna la partenza.','err'); return; }
+  STG.cur.finish={lat:p.lat,lon:p.lon};
+  stgSave();
+  st('st-gps','🏁 ARRIVO di "'+STG.cur.name+'" memorizzato. La prova è pronta: al prossimo passaggio sulla partenza il cronometro parte da solo.','ok');
+  stagePanelRefresh();
+};
+window.stageAddSplit=function(){
+  if(!STG.cur){ st('st-gps','Nessuna prova attiva.','err'); return; }
+  if(STG.state==='run'){
+    STG.cur.splits.push(+STG.dist.toFixed(0));
+    STG.cur.splits.sort(function(a,b){return a-b;});
+    stgSave();
+    st('st-gps','➕ Split a '+(STG.dist/1000).toFixed(2)+' km memorizzato.','ok');
+  } else {
+    st('st-gps','Gli split si segnano DURANTE la prova.','err');
+  }
+  stagePanelRefresh();
+};
+window.stageReset=function(){
+  if(!STG.cur) return;
+  if(!confirm('Cancellare la prova "'+STG.cur.name+'" (punti e tempi)?')) return;
+  delete STG.list[STG.cur.name]; STG.cur=null; STG.state='idle'; stgSave();
+  st('st-gps','Prova cancellata.'); stagePanelRefresh();
+};
+window.stageSelect=function(nm){
+  stgLoad(); STG.cur=STG.list[nm]||null; STG.state=STG.cur? 'armed':'idle';
+  st('st-gps', STG.cur? ('🏁 Prova attiva: '+nm+(STG.cur.best!=null? ' · riferimento '+fmtLap(STG.cur.best):'')) : 'Nessuna prova.');
+  stagePanelRefresh();
+};
+function stgRefTimeAt(d){
+  var r=STG.cur&&STG.cur.ref; if(!r||!r.length) return null;
+  if(d<=r[0][0]) return r[0][1];
+  var lo=0,hi=r.length-1;
+  while(lo<hi-1){ var m=(lo+hi)>>1; if(r[m][0]<=d) lo=m; else hi=m; }
+  var A=r[lo],B=r[hi];
+  if(B[0]<=A[0]) return A[1];
+  return A[1]+(B[1]-A[1])*(d-A[0])/(B[0]-A[0]);
+}
+function stgAutoSplits(distM){
+  /* intertempi automatici: ogni km (impostabile). Prove corte: 3 segmenti
+     uguali. Servono a dare subito i parziali senza segnarli a mano. */
+  var step=(STG.cur.autoKm!=null? STG.cur.autoKm : 1)*1000;
+  var out=[];
+  if(step>0 && distM>=step*1.5){
+    for(var d=step; d<distM-150; d+=step) out.push(Math.round(d));
+  } else if(distM>300){
+    out.push(Math.round(distM/3)); out.push(Math.round(2*distM/3));
+  }
+  return out;
+}
+window.stageAutoKm=function(){
+  if(!STG.cur){ st('st-gps','Nessuna prova attiva.','err'); return; }
+  var v=prompt('Intertempi automatici ogni quanti km? (0 = solo quelli segnati a mano)',
+               String(STG.cur.autoKm!=null? STG.cur.autoKm : 1));
+  if(v===null) return;
+  var n=parseFloat(String(v).replace(',','.'));
+  if(!isFinite(n)||n<0){ st('st-gps','Valore non valido.','err'); return; }
+  STG.cur.autoKm=n;
+  STG.cur.autoGen=false;                       // rigenera alla prossima discesa
+  if(n===0){ STG.cur.splits=[]; }
+  stgSave();
+  st('st-gps','⏱ Intertempi automatici: '+(n>0? ('ogni '+n+' km'):'disattivati')+'. Si applicano dalla prossima discesa.','ok');
+  stagePanelRefresh();
+};
+function stgFinish(tEnd){
+  var tot=tEnd-STG.t0;
+  /* prima discesa completata: se non ci sono intertempi segnati a mano,
+     li crea da solo sulla lunghezza reale della prova */
+  if(!STG.cur.autoGen && (!STG.cur.splits || !STG.cur.splits.length) && STG.cur.autoKm!==0){
+    var auto=stgAutoSplits(STG.dist);
+    if(auto.length){
+      STG.cur.splits=auto; STG.cur.autoGen=true;
+      st('st-gps','⏱ '+auto.length+' intertempi creati in automatico ('+auto.map(function(x){return (x/1000).toFixed(1);}).join(', ')+' km): attivi dalla prossima discesa.','ok');
+    }
+  }
+  var isBest=(STG.cur.best==null || tot<STG.cur.best);
+  var prevSplits=(STG.cur.runs.length? STG.cur.runs[STG.cur.runs.length-1].s : null);
+  var run={ t:Math.round(tot), s:STG.splitTimes.slice(), at:Date.now(), d:Math.round(STG.dist) };
+  STG.cur.runs.push(run);
+  if(STG.cur.runs.length>50) STG.cur.runs.shift();
+  if(isBest){ STG.cur.best=Math.round(tot); STG.cur.ref=STG.samples.slice(); }
+  stgSave();
+  try { txSend({ k:'stg', ev:'end', name:STG.cur.name, t:Math.round(tot),
+    s:STG.splitTimes.map(function(x){return Math.round(x);}),
+    sp:STG.cur.splits.slice(), b:STG.cur.best, best:isBest?1:0,
+    d:Math.round(STG.dist), n:STG.cur.runs.length }); } catch(e){}
+  try { legSet('tf','',true); } catch(eL){}
+  st('st-gps','🏁 '+STG.cur.name+': '+fmtLap(tot)+(isBest?' — MIGLIORE!':(STG.cur.best!=null? ' ('+fmtDelta(tot-STG.cur.best)+')':'')),'ok');
+  STG.state='armed'; STG.lastDelta=null;
+  stagePanelRefresh();
+}
+function stageAutoPick(p){
+  /* riconosce da solo la prova salvata piu' vicina (entro 300 m dalla sua
+     partenza) e la carica: nessuna selezione a mano al mattino */
+  if(STG.state==='run') return;
+  var best=null,bd=1e9;
+  Object.keys(STG.list||{}).forEach(function(k){
+    var S=STG.list[k]; if(!S||!S.start) return;
+    var dd=hav(p.lat,p.lon,S.start.lat,S.start.lon);
+    if(dd<bd){ bd=dd; best=S; }
+  });
+  if(best && bd<300 && (!STG.cur || STG.cur.name!==best.name)){
+    STG.cur=best; STG.state='armed';
+    st('st-gps','🏁 '+best.name+' riconosciuta ('+Math.round(bd)+' m dalla partenza) — cronometro pronto'+
+       (best.best!=null? ' · riferimento '+fmtLap(best.best):''),'ok');
+    try { txSend({k:'stg', ev:'ready', name:best.name, b:(best.best!=null?best.best:null)}); } catch(e){}
+    stagePanelRefresh();
+  }
+}
+function stageUpdate(p){
+  try { stageAutoPick(p); } catch(eA){}
+  if(!STG.cur || !STG.cur.start) return;
+  var prev=STG.prevP; STG.prevP=p;
+  var dStart=hav(p.lat,p.lon,STG.cur.start.lat,STG.cur.start.lon);
+  if(STG.state==='armed'){
+    if(dStart<30 && (p.v==null || p.v*3.6>8)){
+      // verso di marcia coerente con quello memorizzato
+      if(STG.cur.start.brg!=null && prev){
+        var h=bearing(prev,p);
+        if(angDiff(h,STG.cur.start.brg)>100) return;
+      }
+      var tC=p.t;
+      if(prev){
+        var dPrev=hav(prev.lat,prev.lon,STG.cur.start.lat,STG.cur.start.lon);
+        var f=(dPrev+dStart)>0? dPrev/(dPrev+dStart):1;
+        tC=prev.t+(p.t-prev.t)*Math.max(0,Math.min(1,f));
+      }
+      try { legSet('ps', STG.cur.name, true); } catch(eL){}
+      STG.state='run'; STG.t0=tC; STG.dist=0; STG.samples=[[0,0]];
+      STG.splitIdx=0; STG.splitTimes=[]; STG.lastDelta=null;
+      st('st-gps','🚦 VIA! '+STG.cur.name+(STG.cur.best!=null? ' · riferimento '+fmtLap(STG.cur.best):''),'ok');
+      try { txSend({k:'stg', ev:'start', name:STG.cur.name, t:Date.now()}); } catch(e){}
+    }
+    return;
+  }
+  if(STG.state!=='run') return;
+  if(prev) STG.dist+=hav(prev.lat,prev.lon,p.lat,p.lon);
+  var el=p.t-STG.t0;
+  STG.samples.push([STG.dist, el]);
+  if(STG.samples.length>6000) STG.samples=STG.samples.filter(function(_,i){return i%2===0;});
+  // delta continuo contro il riferimento
+  var tr=stgRefTimeAt(STG.dist);
+  STG.lastDelta=(tr!=null)? (el-tr) : null;
+  // split memorizzati
+  var sp=STG.cur.splits||[];
+  while(STG.splitIdx<sp.length && STG.dist>=sp[STG.splitIdx]){
+    var sT=el;
+    STG.splitTimes.push(sT);
+    var refS=stgRefTimeAt(sp[STG.splitIdx]);
+    var dS=(refS!=null)? (sT-refS):null;
+    st('st-gps','⏱ Split '+(STG.splitIdx+1)+' ('+(sp[STG.splitIdx]/1000).toFixed(1)+' km): '+fmtLap(sT)+(dS!=null? '  '+fmtDelta(dS):''),'ok');
+    try { txSend({k:'stg', ev:'split', name:STG.cur.name, i:STG.splitIdx+1,
+      t:Math.round(sT), dl:(dS!=null? Math.round(dS):null), km:+(sp[STG.splitIdx]/1000).toFixed(2) }); } catch(e){}
+    STG.splitIdx++;
+  }
+  // arrivo
+  if(STG.cur.finish){
+    var dFin=hav(p.lat,p.lon,STG.cur.finish.lat,STG.cur.finish.lon);
+    if(dFin<30 && el>5000){
+      var tEnd=p.t;
+      if(prev){
+        var dP=hav(prev.lat,prev.lon,STG.cur.finish.lat,STG.cur.finish.lon);
+        var ff=(dP+dFin)>0? dP/(dP+dFin):1;
+        tEnd=prev.t+(p.t-prev.t)*Math.max(0,Math.min(1,ff));
+      }
+      stgFinish(tEnd);
+    }
+  }
+}
+window.stagePanel=function(){
+  var ex=$('stagepanel');
+  if(ex){ ex.style.display=(ex.style.display==='none')?'flex':'none'; if(ex.style.display==='flex') stagePanelRefresh(); return; }
+  stgLoad();
+  var d=document.createElement('div');
+  d.id='stagepanel';
+  d.style.cssText='position:fixed;inset:0;z-index:999997;background:rgba(0,0,0,.93);display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto';
+  d.innerHTML='<div style="background:#12141a;border:1px solid #333;border-radius:14px;padding:16px;width:100%;max-width:460px">'+
+    '<div style="font-weight:800;font-size:17px;margin-bottom:4px">🏁 PROVA / SPECIALE</div>'+
+    '<div class="small" style="opacity:.65;margin-bottom:10px">Segna partenza e arrivo una volta: il software li ricorda sul GPS. Gli <b>intertempi li crea da solo</b> alla prima discesa (ogni km); puoi comunque aggiungerne a mano nei punti che vuoi.</div>'+
+    '<div id="stg-info" class="small" style="margin-bottom:10px"></div>'+
+    '<button class="b-green big" style="width:100%;margin-bottom:6px" onclick="stageSetStart()">🚦 SEGNA PARTENZA (qui)</button>'+
+    '<button class="b-gray big" style="width:100%;margin-bottom:6px" onclick="stageSetFinish()">🏁 SEGNA ARRIVO (qui)</button>'+
+    '<button class="b-gray big" style="width:100%;margin-bottom:6px" onclick="stageAddSplit()">➕ SEGNA SPLIT A MANO (durante la prova)</button>'+
+    '<button class="b-gray big" style="width:100%;margin-bottom:6px" id="stg-auto-btn" onclick="stageAutoKm()">⏱ INTERTEMPI AUTOMATICI</button>'+
+    '<div id="stg-km" class="small" style="margin:10px 0;padding:8px;background:#1c1f27;border-radius:8px"></div>'+
+    '<div id="stg-co" class="small" style="margin:8px 0;padding:8px;background:#1c1f27;border-radius:8px"></div>'+
+    '<button class="b-gray big" style="width:100%;margin-bottom:6px" onclick="coSet()">⏰ IMPOSTA CONTROLLO ORARIO</button>'+
+    '<button class="b-gray big" style="width:100%;margin-bottom:6px" id="stg-tyre-btn" onclick="tyreSet()">🛞 TRENO GOMME</button>'+
+    '<button class="b-gray big" style="width:100%;margin-bottom:6px" onclick="legReset()">🔄 AZZERA KM DI GIORNATA</button>'+
+    '<div id="stg-list" style="margin:8px 0"></div>'+
+    '<div style="display:flex;gap:8px">'+
+    '<button class="b-gray big" style="flex:1" onclick="stageReset()">🗑 CANCELLA</button>'+
+    '<button class="b-gray big" style="flex:1" onclick="stagePanel()">CHIUDI</button></div></div>';
+  document.body.appendChild(d);
+  stagePanelRefresh();
+};
+function stagePanelRefresh(){
+  var inf=$('stg-info'); if(!inf) return;
+  var C=STG.cur;
+  inf.innerHTML = C? ('<b>'+C.name+'</b> · partenza '+(C.start?'✅':'—')+' · arrivo '+(C.finish?'✅':'—')+
+    ' · intertempi '+(C.splits?C.splits.length:0)+(C.autoGen?' (automatici)':'')+
+    ' · passaggi '+(C.runs?C.runs.length:0)+
+    (C.best!=null? '<br>riferimento: <b>'+fmtLap(C.best)+'</b>':'')+
+    '<br>stato: '+({idle:'—',armed:'in attesa del passaggio sulla partenza',run:'PROVA IN CORSO'}[STG.state]||STG.state))
+    : 'Nessuna prova impostata.';
+  var km=$('stg-km');
+  if(km) km.innerHTML='<b>KM DI GIORNATA</b><br>🚦 prove speciali: <b>'+(LEG.totPS/1000).toFixed(2)+' km</b> ('+LEG.n+' PS)'+
+    '<br>🚗 trasferimenti: <b>'+(LEG.totTF/1000).toFixed(2)+' km</b>'+
+    '<br>in corso: '+(LEG.mode==='ps'?'PS':'trasferimento')+' '+(LEG.km/1000).toFixed(2)+' km';
+  var tb=$('stg-tyre-btn'); if(tb) tb.textContent='🛞 TRENO GOMME: '+(LEG.tyre||'—');
+  try { coRefresh(); } catch(e){}
+  var ab=$('stg-auto-btn');
+  if(ab) ab.textContent='⏱ INTERTEMPI AUTOMATICI: '+((C&&C.autoKm===0)? 'OFF' : ('ogni '+((C&&C.autoKm!=null)?C.autoKm:1)+' km'));
+  var ls=$('stg-list'); if(!ls) return;
+  var ks=Object.keys(STG.list||{});
+  ls.innerHTML = ks.length? ('<div class="small" style="opacity:.6;margin-bottom:4px">Prove salvate:</div>'+ks.map(function(k){
+    var S=STG.list[k];
+    return '<button class="b-gray" style="width:100%;text-align:left;margin-bottom:4px;padding:7px 10px;font-size:13px" onclick="stageSelect(\''+k.replace(/'/g,"")+'\')">'+
+      (STG.cur&&STG.cur.name===k?'▶ ':'')+k+' <span style="opacity:.6">'+(S.best!=null? fmtLap(S.best):'—')+' · '+(S.runs?S.runs.length:0)+' passaggi</span></button>';
+  }).join('')) : '';
+}
 /* ── SCANNER CODICI REMOTO: il telefono inquadra QR/codici a barre e
    il testo arriva live al box sul canale dati, dentro il campo attivo ── */
 var SCAN={ on:false, stream:null, vid:null, timer:null, det:null, lastTxt:null, lastT:0 };
@@ -1567,6 +1937,7 @@ window.addEventListener('error',function(ev){
 window.addEventListener('unhandledrejection',function(ev){
   try { var r=ev&&ev.reason; txSend({k:'diag', s:'⚠️ ERRORE APP (promise): '+String((r&&r.message)||r).slice(0,120)}); } catch(e){}
 });
+try { stgLoad(); legLoad(); coLoad(); LEG.tyre=localStorage.getItem('reptx_tyre')||''; setTimeout(legBtn,300); setInterval(coTick,20000); } catch(e){}
 var _repTick=Date.now();
 setInterval(function(){
   var now=Date.now(), gap=now-_repTick;
@@ -1581,6 +1952,413 @@ document.addEventListener('visibilitychange',function(){
     keepAwake();
   }
 });
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRASMETTITORE v5.1 — MIGLIORIE
+
+   1. NIENTE BUCHI NELLA TRACCIA DEL BOX. Se la linea cade (galleria,
+      valle senza campo, relay che si riaggancia), i punti GPS registrati
+      nel frattempo restano in coda sul telefono. Appena il box torna
+      raggiungibile partono da soli, nell'ordine giusto, a piccoli gruppi
+      per non intasare la linea. Prima andavano persi per il live: il box
+      li riceveva solo a fine giornata con 📤.
+   2. STATO DELLA LINEA SEMPRE VISIBILE: pallino verde/giallo/rosso, da
+      quanti secondi il box non risponde, canale diretto o relay, punti in
+      coda.
+   3. GPS PERSO: se durante la registrazione il segnale sparisce per più
+      di 10 s lo dice a schermo e lo manda al box (in macchina nessuno
+      guarda il telefono). Quando torna, lo dice.
+   4. BATTERIA (dove il telefono la comunica, Android): percentuale sempre
+      a schermo, avviso a schermo e al box al 20% e al 10%.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+
+/* ── 1. coda dei punti ── */
+var CODA = window.CODA = { q: [], max: 30000, persi: 0, recuperati: 0, inRecupero: false };
+window.txPunto = function(m){
+  if(TX.on && !CODA.q.length){ if(txSend(m)){ REC.sent++; return; } }
+  if(TX.want){
+    CODA.q.push(m);
+    if(CODA.q.length > CODA.max){ CODA.q.shift(); CODA.persi++; }
+  }
+};
+setInterval(function(){
+  if(!CODA.q.length){
+    if(CODA.inRecupero){
+      CODA.inRecupero = false;
+      st('st-conn', '✅ Recuperati ' + CODA.recuperati + ' punti rimasti indietro: la traccia al box è completa.', 'ok');
+      CODA.recuperati = 0;
+    }
+    return;
+  }
+  if(!TX.on) return;
+  CODA.inRecupero = true;
+  var n = 0;
+  while(CODA.q.length && n < 40){
+    if(!txSend(CODA.q[0])) break;
+    CODA.q.shift(); REC.sent++; CODA.recuperati++; n++;
+  }
+  var e = $('sent'); if(e) e.textContent = REC.sent;
+}, 250);
+
+/* STACCA volontario: la coda non serve più */
+var conn0 = window.doConnect;
+window.doConnect = function(){
+  var eraCollegato = TX.on || TX.want;
+  var r = conn0.apply(this, arguments);
+  if(eraCollegato && !TX.want){ CODA.q.length = 0; CODA.inRecupero = false; CODA.recuperati = 0; }
+  return r;
+};
+
+/* ── 3. GPS perso ── */
+var GPSW = { last: 0, lost: false };
+try {
+  var geo = navigator.geolocation;
+  if(geo && geo.watchPosition){
+    var wp = geo.watchPosition.bind(geo);
+    geo.watchPosition = function(ok, err, opt){
+      GPSW.last = Date.now(); GPSW.lost = false;
+      return wp(function(pos){
+        GPSW.last = Date.now();
+        if(GPSW.lost){
+          GPSW.lost = false;
+          window._stHold = 0;
+          st('st-gps', '✅ GPS di nuovo agganciato: la registrazione continua.', 'ok');
+          window._stHold = Date.now() + 6000;
+          try { txSend({ k: 'diag', s: '✅ GPS di nuovo agganciato' }); } catch(e){}
+        }
+        return ok(pos);
+      }, err, opt);
+    };
+  }
+} catch(e){}
+
+/* ── 4. batteria ── */
+var BATT = { liv: null, carica: false, avvisato: 100 };
+try {
+  if(navigator.getBattery) navigator.getBattery().then(function(b){
+    var agg = function(){
+      BATT.liv = Math.round(b.level * 100); BATT.carica = !!b.charging;
+      if(BATT.carica){ BATT.avvisato = 100; return; }
+      var soglia = BATT.liv <= 10 ? 10 : (BATT.liv <= 20 ? 20 : 100);
+      if(soglia < BATT.avvisato){
+        BATT.avvisato = soglia;
+        var s = '🔋 Batteria del telefono al ' + BATT.liv + '% — collega il caricatore';
+        st('st-gps', '⚠️ ' + s, 'err');
+        try { if(TX.on) txSend({ k: 'diag', s: s }); } catch(e){}
+      }
+    };
+    agg();
+    b.addEventListener('levelchange', agg);
+    b.addEventListener('chargingchange', agg);
+  }).catch(function(){});
+} catch(e){}
+
+/* ── 2. riga di stato della linea (ogni secondo) ── */
+function riga(){
+  var e = $('st-link'); if(!e) return;
+  var parti = [], cls = '';
+  if(TX.want){
+    if(TX.on){
+      var eta = Math.round((Date.now() - (TX.lastAck || Date.now())) / 1000);
+      var canale = TX.mq ? 'relay' : 'diretto';
+      if(eta <= 12){ parti.push('🟢 Box raggiungibile · canale ' + canale + ' · ultimo segnale ' + eta + ' s fa'); cls = 'ok'; }
+      else { parti.push('🟡 Nessun segnale dal box da ' + eta + ' s · canale ' + canale); cls = 'err'; }
+    } else { parti.push('🔴 Linea assente — registro sul telefono, recupero dopo'); cls = 'err'; }
+    if(CODA.q.length) parti.push('📦 in coda: ' + CODA.q.length + ' punti');
+    if(CODA.persi) parti.push('persi (coda piena): ' + CODA.persi);
+  }
+  if(REC.id !== null && GPSW.last){
+    var sg = Math.round((Date.now() - GPSW.last) / 1000);
+    if(sg > 10){
+      parti.push('⚠️ GPS perso da ' + sg + ' s');
+      cls = 'err';
+      if(!GPSW.lost){
+        GPSW.lost = true;
+        st('st-gps', '⚠️ GPS perso: nessuna posizione da ' + sg + ' s. La registrazione riprende da sola quando torna il segnale.', 'err');
+        try { if(TX.on) txSend({ k: 'diag', s: '⚠️ GPS perso da ' + sg + ' s' }); } catch(err){}
+      }
+    }
+  }
+  if(BATT.liv != null) parti.push('🔋 ' + BATT.liv + '%' + (BATT.carica ? ' ⚡' : ''));
+  var t = parti.join(' · ');
+  if(e.textContent !== t) e.textContent = t;
+  e.className = 'status' + (cls ? ' ' + cls : '');
+  e.style.display = t ? '' : 'none';
+}
+setInterval(riga, 1000);
+document.addEventListener('DOMContentLoaded', riga);
+})();
+
+/* ── 5. su telefoni stretti il pulsante CONNETTI usciva dallo schermo:
+   il campo del codice ora si restringe invece di spingerlo fuori ── */
+(function(){
+  var s = document.createElement('style');
+  s.textContent = 'input#code{min-width:0;width:0}#btn-conn{flex:0 0 auto}h1{flex-wrap:wrap;row-gap:4px}';
+  (document.head || document.documentElement).appendChild(s);
+})();
+
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRASMETTITORE — ITALIANO / INGLESE
+
+   Interruttore IT | EN in alto; la scelta resta (reptx_lang).
+   I messaggi del telefono sono fatti di pezzi fissi più numeri e nomi:
+   si traduce la frase intera se è nota, altrimenti pezzo per pezzo
+   (i pezzi più lunghi prima). Nomi di vetture, prove e circuiti restano.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+var D = {
+/* ── schermata ── */
+'📡 REP TELEMETRIA':'📡 REP TELEMETRY','REP Telemetria':'REP Telemetry','COLLEGAMENTO AL BOX':'LINK TO THE PIT BOX',
+'NOME AUTO (es. CLIO 5)':'CAR NAME (e.g. CLIO 5)','CODICE':'CODE','CONNETTI':'CONNECT','STACCA':'DISCONNECT',
+'Inserisci il codice mostrato sul PC box (📍 GPS logger → RICEZIONE BOX).':'Enter the code shown on the pit box PC (📍 GPS logger → PIT BOX RECEPTION).',
+'KM/H':'KM/H','V MAX':'TOP SPEED','TEMPO':'TIME','PUNTI':'POINTS','INVIATI':'SENT',
+'⏹ STOP':'⏹ STOP','⬇ SCARICA CSV':'⬇ DOWNLOAD CSV',
+'🎥 VIDEO LIVE: OFF':'🎥 LIVE VIDEO: OFF','🎥 VIDEO LIVE: ':'🎥 LIVE VIDEO: ',
+'🎙 MICROFONO: OFF':'🎙 MICROPHONE: OFF','🎙 MICROFONO: ON':'🎙 MICROPHONE: ON','🎙 MICROFONO: ':'🎙 MICROPHONE: ',
+'🏁 PROVA / SPECIALE':'🏁 STAGE / SPECIAL','🚗 TRASFERIMENTO (tocca per PS)':'🚗 ROAD SECTION (tap for STAGE)',
+'🚗 Trasferimento':'🚗 Road section',' — tocca per TRASFERIMENTO':' — tap for ROAD SECTION',
+'📷 SCAN CODICI: OFF':'📷 CODE SCAN: OFF','📷 SCAN CODICI: ON':'📷 CODE SCAN: ON',
+'📐 FORMATO: ORIZZONTALE':'📐 FORMAT: LANDSCAPE','📐 FORMATO: VERTICALE':'📐 FORMAT: PORTRAIT','📐 FORMATO: ':'📐 FORMAT: ',
+'ORIZZONTALE':'LANDSCAPE','VERTICALE':'PORTRAIT',
+'💾 SALVA VIDEO':'💾 SAVE VIDEO','💾 SALVA VIDEO (':'💾 SAVE VIDEO (',
+'🔒 BLOCCA SCHERMO':'🔒 LOCK SCREEN','🗂 REGISTRAZIONI SUL TELEFONO':'🗂 RECORDINGS ON THE PHONE',
+'⟳ SENSORI':'⟳ SENSORS','Prove salvate:':'Saved stages:','CHIUDI':'CLOSE','annulla':'cancel','🗑 CANCELLA':'🗑 DELETE',
+'Registra sempre anche in locale: se cade la connessione i dati non si perdono.':'It always records locally too: if the connection drops, no data is lost.',
+'Tieni lo schermo acceso (ci pensa la pagina se il telefono lo permette).':'Keep the screen on (the page does it if the phone allows).',
+/* ── collegamento ── */
+'Connessione…':'Connecting…','Collegato al box — premi START.':'Connected to the pit box — press START.',
+'Collegato al box via relay — premi START.':'Connected to the pit box via relay — press START.','Scollegato.':'Disconnected.',
+'Inserisci il codice del box.':'Enter the pit box code.','Prima inserisci il codice del box.':'Enter the pit box code first.',
+'Rete diretta bloccata: passo dal relay…':'Direct network blocked: switching to the relay…',
+'Relay non caricabile: controlla internet.':'Relay can\'t be loaded: check the internet.','Nessun relay raggiungibile.':'No relay reachable.',
+'Canale diretto perso: passo al relay…':'Direct channel lost: switching to the relay…','Errore canale diretto: passo al relay…':'Direct channel error: switching to the relay…',
+'🔁 Canale diretto muto: passo al relay…':'🔁 Direct channel silent: switching to the relay…',
+'🔁 Box silenzioso: ricollego (stesso codice)…':'🔁 Pit box silent: reconnecting (same code)…',
+'PeerJS non caricabile: controlla internet.':'PeerJS can\'t be loaded: check the internet.','PeerJS non caricabile.':'PeerJS can\'t be loaded.',
+'Codice errato o box non attivo':'Wrong code or pit box not active','Internet non raggiungibile':'Internet unreachable',
+'Browser non compatibile':'Browser not compatible','Errore: ':'Error: ','🎛 Comando dal box eseguito: ':'🎛 Pit box command executed: ',
+'⚠️ Telefono sospeso per ~':'⚠️ Phone suspended for ~',' s (schermo spento?). Controlla Blocco automatico: MAI. Ripristino tutto…':' s (screen off?). Check Auto-Lock: NEVER. Restoring everything…',
+'Prima collegati al box (codice + CONNETTI), poi 📤.':'Connect to the pit box first (code + CONNECT), then 📤.',
+'Invio "':'Sending "','" inviata al box (':'" sent to the pit box (','Invio interrotto: connessione persa.':'Sending interrupted: connection lost.',
+/* ── GPS e registrazione ── */
+'GPS non disponibile in questo browser.':'GPS not available in this browser.','In attesa del segnale GPS… (consenti la posizione)':'Waiting for the GPS signal… (allow location)',
+'Registro e trasmetto.':'Recording and transmitting.','Registro (solo locale: box non collegato).':'Recording (local only: pit box not connected).',
+'Errore GPS: ':'GPS error: ','Fermato: ':'Stopped: ',' punti, ':' points, ',' km, Vmax ':' km, Vmax ',' km/h. Il box ha salvato il percorso.':' km/h. The pit box saved the route.',
+'Fermato (nessun punto).':'Stopped (no points).',' punti).':' points).',' punti':' points',
+'♻ Registrazione interrotta recuperata dall\'ultima bozza.':'♻ Interrupted recording recovered from the last draft.',' (recuperata)':' (recovered)',
+'Attendi il segnale GPS (premi START).':'Wait for the GPS signal (press START).',
+/* ── schermo bloccato / acceso ── */
+'Schermo bloccato':'Screen locked','tieni premuto 5 secondi per sbloccare':'hold for 5 seconds to unlock',
+'lo schermo deve restare ACCESO':'the screen must stay ON','⚠️ NON premere il tasto laterale:':'⚠️ DO NOT press the side button:',
+'(abbassa la luminosità per scaldare meno)':'(lower the brightness to reduce heat)',
+'Schermo tenuto acceso: ':'Screen kept on: ','wake lock attivo':'wake lock active','video-loop attivo':'video loop active',
+'NON DISPONIBILE':'NOT AVAILABLE',' — imposta Blocco automatico: MAI!':' — set Auto-Lock: NEVER!',
+'messaggio dal box — tocca per chiudere':'message from the pit box — tap to close',
+/* ── video, microfono ── */
+'Avvio camera…':'Starting camera…','Camera negata.':'Camera denied.','Camera non disponibile.':'Camera not available.',
+'Camera non disponibile in questo browser.':'Camera not available in this browser.','Audio/video spenti.':'Audio/video off.',
+'Audio/video spenti (scollegato).':'Audio/video off (disconnected).','Errore video: ':'Video error: ','Errore chiamata video: ':'Video call error: ',
+'Video: ':'Video: ','Permesso camera/microfono negato o errore: ':'Camera/microphone permission denied or error: ',
+'Formato aggiornato: si applica alla prossima accensione.':'Format updated: it applies the next time it starts.',
+'Formato cambiato: riavvio la ripresa… (scegli il formato PRIMA del run: questo riavvio può richiedere un nuovo consenso)':'Format changed: restarting the capture… (choose the format BEFORE the run: this restart may ask for permission again)',
+' in onda verso il box · REC locale attiva.':' on air to the pit box · local REC active.',' inviato al box · REC ':' sent to the pit box · REC ',
+' attivo — camera già autorizzata, nessun nuovo consenso.':' active — camera already authorised, no new permission.',
+'⏸ In pausa — camera pronta: riattivabile anche dal box, senza consenso.':'⏸ Paused — camera ready: can be restarted from the pit box too, without permission.',
+'📡 Camera ripartita.':'📡 Camera restarted.','📡 Video fluido ripristinato.':'📡 Smooth video restored.',
+'📷 Video fluido assente: mando FOTOGRAMMI sul canale dati — il fluido tornerà da solo.':'📷 No smooth video: sending FRAMES on the data channel — smooth video will come back by itself.',
+'⚠️ Live non disponibile su questa rete — la REC locale continua, ritento da solo.':'⚠️ Live not available on this network — local REC continues, retrying by itself.',
+'⚠️ iPhone ha sospeso la camera (altra app o doppio accesso)…':'⚠️ iPhone suspended the camera (another app or double access)…',
+'❌ Camera: ':'❌ Camera: ','❌ La camera non dà immagini: chiudi le altre app che la usano (o riavvia Safari) e ripremi 🎥.':'❌ The camera gives no picture: close the other apps using it (or restart Safari) and press 🎥 again.',
+'🔁 Camera senza immagini (':'🔁 Camera without picture (','): la riavvio (':'): restarting it (','🔁 Riaggancio il canale ':'🔁 Re-attaching the channel ',
+' · riaggancio in corso':' · re-attaching','Sorgente ok — collego ':'Source OK — connecting ',' al box…':' to the pit box…',' · canale: ':' · channel: ',
+'🎙 Microfono sacrificato per salvare il video (riattivalo piu tardi se vuoi riprovare).':'🎙 Microphone dropped to save the video (turn it back on later if you want to retry).',
+'🎙 Richiesta con microfono fallita: continuo SOLO video.':'🎙 Request with microphone failed: continuing with video ONLY.',
+'nessuna traccia':'no track','traccia terminata':'track ended','traccia silenziata da iOS':'track muted by iOS','zero fotogrammi':'zero frames',
+' MB · camera: ':' MB · camera: ',
+/* ── sensori ── */
+'Sensori attivi — assi in calibrazione: una frenata o accelerazione decisa e partono le g.':'Sensors active — axes calibrating: one firm braking or acceleration and the g readings start.',
+'Assi calibrati: g attive.':'Axes calibrated: g readings active.','Sensori di movimento non supportati: solo GPS.':'Motion sensors not supported: GPS only.',
+'Sensori fermi: premi ⟳ SENSORI (e consenti il movimento).':'Sensors stopped: press ⟳ SENSORS (and allow motion).',
+'Serve un tocco per attivare i sensori: premi ⟳ SENSORI.':'A tap is needed to activate the sensors: press ⟳ SENSORS.',
+'Permesso movimento negato: premi ⟳ SENSORI per riprovare.':'Motion permission denied: press ⟳ SENSORS to retry.',
+'FRENO':'BRAKE','GAS':'THROTTLE','⚠️ URTO RILEVATO ':'⚠️ IMPACT DETECTED ',' g — segnalato al box.':' g — reported to the pit box.',
+'Frenata 100-0':'Braking 100-0',
+/* ── giri ── */
+'🏁 Giro ':'🏁 Lap ',' — BEST!':' — BEST!',' — MIGLIORE!':' — BEST!',' — 🏆 RECORD PERSONALE!':' — 🏆 PERSONAL BEST!',' Record personale: ':' Personal best: ',
+'🏁 Circuito: ':'🏁 Circuit: ',' riconosciuto — traguardo in memoria: cronometro pronto.':' recognised — finish line in memory: timer ready.',
+' riconosciuta (':' recognised (',' m dalla partenza) — cronometro pronto':' m from the start) — timer ready',
+'🏁 Traguardo fissato qui: cronometro attivo (memorizzato per ':'🏁 Finish line set here: timer active (saved for ','questo tracciato':'this track',
+' — il traguardo si impara al primo passaggio lanciato.':' — the finish line is learnt on the first flying pass.',
+' · best ':' · best ',' · ultimo ':' · last ',' · teorico ':' · theoretical ',' · passaggi ':' · passes ',' · rif ':' · ref ',' · riferimento ':' · reference ',
+'Circuito':'Circuit',
+/* ── prove speciali e trasferimenti ── */
+'🏁 Prova attiva: ':'🏁 Active stage: ','Nessuna prova attiva.':'No active stage.','Nessuna prova impostata.':'No stage set.','Nessuna prova.':'No stages.',
+'Nome della prova:':'Stage name:','Prima segna la partenza.':'Mark the start first.','Prova cancellata.':'Stage deleted.','Cancellare la prova "':'Delete the stage "',
+'" (punti e tempi)?':'" (points and times)?','🚦 SEGNA PARTENZA (qui)':'🚦 MARK START (here)','🏁 SEGNA ARRIVO (qui)':'🏁 MARK FINISH (here)',
+'➕ SEGNA SPLIT A MANO (durante la prova)':'➕ MARK SPLIT BY HAND (during the stage)','⏱ INTERTEMPI AUTOMATICI':'⏱ AUTOMATIC SPLITS',
+'⏱ INTERTEMPI AUTOMATICI: ':'⏱ AUTOMATIC SPLITS: ','⏱ Intertempi automatici: ':'⏱ Automatic splits: ','ogni ':'every ','disattivati':'disabled',
+'. Si applicano dalla prossima discesa.':'. They apply from the next run.',
+'Intertempi automatici ogni quanti km? (0 = solo quelli segnati a mano)':'Automatic splits every how many km? (0 = only the ones marked by hand)',
+' intertempi creati in automatico (':' splits created automatically (',' km): attivi dalla prossima discesa.':' km): active from the next run.',
+' (automatici)':' (automatic)',' (automatico)':' (automatic)',' · intertempi ':' · splits ',' · partenza ':' · start ',' · arrivo ':' · finish ',
+'Gli split si segnano DURANTE la prova.':'Splits are marked DURING the stage.','➕ Split a ':'➕ Split at ','⏱ Split ':'⏱ Split ',
+'🚦 PARTENZA di "':'🚦 START of "','🏁 PARTENZA di "':'🏁 START of "','🏁 ARRIVO di "':'🏁 FINISH of "',
+'" memorizzata. Ora vai all\'arrivo e premi SEGNA ARRIVO.':'" saved. Now go to the finish and press MARK FINISH.',
+'" memorizzato. La prova è pronta: al prossimo passaggio sulla partenza il cronometro parte da solo.':'" saved. The stage is ready: next time you pass the start the timer starts by itself.',
+'🚦 VIA! ':'🚦 GO! ',' chiuso: ':' closed: ','PROVA IN CORSO':'STAGE IN PROGRESS','in attesa del passaggio sulla partenza':'waiting to pass the start',
+'stato: ':'status: ','in corso: ':'in progress: ','riferimento: ':'reference: ','non impostato':'not set',
+'Segna partenza e arrivo una volta: il software li ricorda sul GPS. Gli ':'Mark start and finish once: the software remembers them on GPS. The ',
+'intertempi li crea da solo':'splits are created automatically',
+' alla prima discesa (ogni km); puoi comunque aggiungerne a mano nei punti che vuoi.':' on the first run (every km); you can still add some by hand wherever you want.',
+'KM DI GIORNATA':'KM TODAY','🚦 prove speciali: ':'🚦 special stages: ','🚗 trasferimenti: ':'🚗 road sections: ',
+' km · trasf. ':' km · road ',' · totali PS ':' · stage totals ',' km · Vmax ':' km · Vmax ',
+'🔄 AZZERA KM DI GIORNATA':'🔄 RESET TODAY\'S KM','Azzerare i totali km di giornata (PS e trasferimenti)?':'Reset today\'s km totals (stages and road sections)?',
+'Totali km azzerati.':'Km totals reset.',
+'🛞 TRENO GOMME':'🛞 TYRE SET','🛞 TRENO GOMME: ':'🛞 TYRE SET: ','🛞 Treno attivo: ':'🛞 Active set: ',' — i km si sommano a questo set':' — km add up to this set',
+'Treno gomme montato (es. SET A, SLICK 2, PIOGGIA):':'Tyre set fitted (e.g. SET A, SLICK 2, RAIN):','Treno gomme non impostato.':'Tyre set not set.',
+' km memorizzato.':' km saved.',
+/* ── controllo orario ── */
+'⏰ CONTROLLO ORARIO':'⏰ TIME CONTROL','⏰ IMPOSTA CONTROLLO ORARIO':'⏰ SET TIME CONTROL','⏰ CO alle ':'⏰ TC at ','⏰ Prossimo CO alle ':'⏰ Next TC at ',
+'⏰ Attenzione: per il CO delle ':'⏰ Warning: for the TC at ',' serve una media di ':' you need an average of ','⏰ CO IN RITARDO ':'⏰ TC LATE ',
+'IN RITARDO di ':'LATE by ','mancano ':'left: ','media necessaria: ':'average needed: ',
+'Orario del prossimo controllo (CO) — formato HH:MM':'Time of the next time control (TC) — format HH:MM',
+'Chilometri da percorrere fino al CO (0 = usa solo l\'orario)':'Km to drive to the TC (0 = use the time only)',
+'Orario non valido (usa HH:MM).':'Invalid time (use HH:MM).','Controllo orario disattivato.':'Time control disabled.','Valore non valido.':'Invalid value.',
+/* ── scanner e magazzino ── */
+'📷 Scanner: inquadra il codice (tocca lo schermo per uscire)…':'📷 Scanner: frame the code (tap the screen to exit)…','Scanner chiuso.':'Scanner closed.','Scanner spento.':'Scanner off.',
+'📷 Spegni prima il VIDEO LIVE: iPhone consente una sola camera per volta.':'📷 Turn off LIVE VIDEO first: iPhone allows only one camera at a time.',
+'📦 PEZZO SCANSIONATO':'📦 SCANNED PART','📦 INVIA AL MAGAZZINO':'📦 SEND TO STOCK','solo codice':'code only','Codice':'Code','Nome pezzo':'Part name',
+'es. Pastiglie freno ant.':'e.g. Front brake pads','Categoria':'Category','Qtà':'Qty','Motore':'Engine','Sospensioni':'Suspension','Freni':'Brakes',
+'Trasmissione':'Transmission','Carrozzeria':'Bodywork','Elettronica':'Electronics','Gomme':'Tyres','Altro':'Other',
+'📤 Codice inviato al box: ':'📤 Code sent to the pit box: ','📦 Inviato al magazzino: ':'📦 Sent to stock: ',
+/* ── errori ── */
+'⚠️ ERRORE APP: ':'⚠️ APP ERROR: ','⚠️ ERRORE APP (promise): ':'⚠️ APP ERROR (promise): ',
+/* ── v5.1 ── */
+'✅ Recuperati ':'✅ Recovered ',' punti rimasti indietro: la traccia al box è completa.':' points left behind: the track at the pit box is complete.',
+'✅ GPS di nuovo agganciato: la registrazione continua.':'✅ GPS locked again: recording continues.',
+'🔋 Batteria del telefono al ':'🔋 Phone battery at ','% — collega il caricatore':'% — plug in the charger',
+'🟢 Box raggiungibile · canale ':'🟢 Pit box reachable · channel ','diretto':'direct',' · ultimo segnale ':' · last signal ',' s fa':' s ago',
+'🟡 Nessun segnale dal box da ':'🟡 No signal from the pit box for ','🔴 Linea assente — registro sul telefono, recupero dopo':'🔴 No connection — recording on the phone, will catch up later',
+'📦 in coda: ':'📦 queued: ','persi (coda piena): ':'lost (queue full): ','⚠️ GPS perso da ':'⚠️ GPS lost for ',
+'⚠️ GPS perso: nessuna posizione da ':'⚠️ GPS lost: no position for ',' s. La registrazione riprende da sola quando torna il segnale.':' s. Recording resumes by itself when the signal returns.',
+'trasmettitore v':'transmitter v'
+};
+var KEY = 'reptx_lang';
+var L = 'it'; try { L = localStorage.getItem(KEY) === 'en' ? 'en' : 'it'; } catch(e){}
+var chiavi = Object.keys(D).filter(function(k){ return D[k] !== k && /[A-Za-zÀ-ÿ]{2}/.test(k) && k.replace(/\s/g, '').length >= 3; })
+  .sort(function(a, b){ return b.length - a.length; });
+var RX = new RegExp(chiavi.map(function(k){ return k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|'), 'g');
+var cache = new Map();
+function tr(s){
+  if(!s || !/[A-Za-zÀ-ÿ]{2}/.test(s)) return null;
+  if(cache.has(s)) return cache.get(s);
+  var t = s.trim(), r;
+  if(D[t] !== undefined) r = s.replace(t, D[t]);
+  else { r = s.replace(RX, function(m){ return D[m]; }); if(r === s) r = null; }
+  if(cache.size > 5000) cache.clear();
+  cache.set(s, r);
+  return r;
+}
+var TXT = new WeakMap(), ATT = new WeakMap();
+var ATTR = ['placeholder', 'title', 'aria-label'];
+function salta(el){
+  for(var e = el; e && e.nodeType === 1; e = e.parentNode){
+    if(/^(SCRIPT|STYLE|TEXTAREA)$/.test(e.nodeName) || e.id === 'lang-sw' || e.id === 'pitboard-t') return true;
+  }
+  return false;
+}
+function testo(n){
+  var p = n.parentNode; if(!p || salta(p)) return;
+  var v = n.nodeValue, rec = TXT.get(n);
+  if(rec && v === rec.en) return;
+  if(L !== 'en'){ if(rec) TXT.delete(n); return; }
+  var en = tr(v); if(en == null || en === v){ if(rec) TXT.delete(n); return; }
+  TXT.set(n, { it: v, en: en }); n.nodeValue = en;
+}
+function attr(el){
+  if(!el.getAttribute || salta(el)) return;
+  var m = ATT.get(el);
+  ATTR.forEach(function(a){
+    if(!el.hasAttribute(a)) return;
+    var v = el.getAttribute(a), rec = m && m[a];
+    if(rec && v === rec.en) return;
+    if(L !== 'en') return;
+    var en = tr(v); if(en == null || en === v) return;
+    if(!m){ m = {}; ATT.set(el, m); }
+    m[a] = { it: v, en: en }; el.setAttribute(a, en);
+  });
+}
+function visita(r){
+  if(!r) return;
+  if(r.nodeType === 3){ testo(r); return; }
+  if(r.nodeType !== 1) return;
+  if(salta(r)) return;
+  attr(r);
+  var w = document.createTreeWalker(r, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT), n;
+  while((n = w.nextNode())){ if(n.nodeType === 3) testo(n); else attr(n); }
+}
+function ripristina(){
+  var w = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT), n;
+  while((n = w.nextNode())){
+    if(n.nodeType === 3){ var r = TXT.get(n); if(r){ if(n.nodeValue === r.en) n.nodeValue = r.it; TXT.delete(n); } }
+    else { var m = ATT.get(n); if(m){ Object.keys(m).forEach(function(a){ if(n.getAttribute(a) === m[a].en) n.setAttribute(a, m[a].it); }); ATT.delete(n); } }
+  }
+}
+try {
+  new MutationObserver(function(mm){
+    if(L !== 'en') return;
+    mm.forEach(function(m){
+      try {
+        if(m.type === 'characterData') testo(m.target);
+        else if(m.type === 'attributes') attr(m.target);
+        else m.addedNodes.forEach(visita);
+      } catch(e){}
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTR });
+} catch(e){}
+['alert', 'confirm', 'prompt'].forEach(function(f){
+  var o = window[f]; if(typeof o !== 'function') return;
+  window[f] = function(msg){ var a = Array.prototype.slice.call(arguments); if(L === 'en' && typeof msg === 'string'){ var t = tr(msg); if(t != null) a[0] = t; } return o.apply(window, a); };
+});
+function interruttore(){
+  var sw = document.getElementById('lang-sw');
+  if(!sw){
+    var h = document.querySelector('h1'); if(!h) return;
+    sw = document.createElement('span'); sw.id = 'lang-sw';
+    sw.style.cssText = 'display:inline-flex;border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-left:8px;flex:0 0 auto';
+    ['it', 'en'].forEach(function(l){
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = l.toUpperCase(); b.dataset.l = l;
+      b.style.cssText = 'border:0;border-radius:0;padding:5px 9px;font-size:11px;font-weight:800;letter-spacing:.05em';
+      b.onclick = function(){ imposta(l); };
+      sw.appendChild(b);
+    });
+    h.appendChild(sw);
+  }
+  Array.prototype.forEach.call(sw.querySelectorAll('button'), function(b){
+    var on = b.dataset.l === L;
+    b.style.background = on ? '#0a84ff' : 'var(--bg3)'; b.style.color = on ? '#fff' : 'var(--dim)';
+  });
+}
+function imposta(l){
+  l = l === 'en' ? 'en' : 'it';
+  if(l !== L){
+    L = l; try { localStorage.setItem(KEY, l); } catch(e){}
+    document.documentElement.lang = l;
+    if(l === 'en') visita(document.body); else ripristina();
+  }
+  interruttore();
+}
+window.TXLANG = { imposta: imposta, lingua: function(){ return L; }, tr: function(s){ var r = tr(s); return r == null ? s : r; } };
+function avvia(){ interruttore(); if(L === 'en'){ document.documentElement.lang = 'en'; visita(document.body); } }
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', avvia); else avvia();
+})();
+
 </script>
 </body>
 </html>
