@@ -44,10 +44,13 @@ button:disabled{ opacity:.35; }
 .foot{ font-size:11px; color:var(--dim); text-align:center; line-height:1.6; }
 @media (prefers-reduced-motion:reduce){ button{ transition:none; } }
 </style>
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.svg">
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("./service-worker.js").catch(function(){});});}</script>
 </head>
 <body>
 <div class="wrap">
-  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.0</small></h1>
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.2</small></h1>
 
   <div class="card">
     <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
@@ -60,6 +63,7 @@ button:disabled{ opacity:.35; }
       <button class="b-blue" id="btn-conn" onclick="doConnect()">CONNETTI</button>
     </div>
     <div class="status" id="st-conn" style="margin-top:8px">Inserisci il codice mostrato sul PC box (📍 GPS logger → RICEZIONE BOX).</div>
+    <div class="status" id="st-link" style="margin-top:4px;display:none"></div>
   </div>
 
   <div class="card">
@@ -441,7 +445,7 @@ window.doStart=function(){
     p.gx=+MOT.glat.toFixed(3); p.gy=+MOT.glong.toFixed(3);
     REC.pts.push(p);
     if(p.v!==null) REC.vmax=Math.max(REC.vmax,p.v);
-    if(TX.on && txSend({k:'p',a:p.lat,o:p.lon,h:p.alt,v:p.v,t:p.t,q:p.q})) REC.sent++;
+    txPunto({k:'p',a:p.lat,o:p.lon,h:p.alt,v:p.v,t:p.t,q:p.q});
     $('v').textContent = p.v!==null? Math.round(p.v*3.6) : '—';
     $('vmax').textContent = Math.round(REC.vmax*3.6);
     $('dist').textContent = (REC.dist/1000).toFixed(2);
@@ -899,7 +903,7 @@ function videoMonitor(){
   /* chiamata "appesa": esiste ma non si e' mai connessa (es. box appena
      ricostruito, id non ancora registrato) — nessun evento la segnala.
      Se non da' segni di vita da troppo tempo, si rifa' da capo. */
-  if(!bad && now-(VID.lastLive||0) > (window._REP_VID_DEAD||30000)) bad=true;
+  if(!bad && now-Math.max(VID.lastLive||0, VID.lastDial||0) > (window._REP_VID_DEAD||30000)) bad=true;
   var liveNow = now-(VID.lastLive||0) < (window._REP_SNAP_AFTER||15000);
   try { txSend({k:'diag',s:'[auto] camera: '+diagCam()+' · canale: '+(VID.snapT?'fotogrammi':(liveNow?'fluido':'assente'))+(bad?' · riaggancio in corso':'')}); } catch(eD){}
   if(VID.want && VID.canvas && !liveNow){
@@ -912,7 +916,7 @@ function videoMonitor(){
     st('st-video','📡 Video fluido ripristinato.','ok');
   }
   if(bad){
-    VID.lastLive=now;
+    VID.lastDial=now;   /* v5.2: un nuovo tentativo NON vuol dire video in onda (prima bloccava i fotogrammi) */
     st('st-video','🔁 Riaggancio il canale '+avLabel()+' al box…');
     try { if(VID.call) VID.call.close(); } catch(e){}
     try { if(VID.peer) VID.peer.destroy(); } catch(e){}
@@ -1948,6 +1952,668 @@ document.addEventListener('visibilitychange',function(){
     keepAwake();
   }
 });
+</script>
+<script>
+/*<ICE-COMUNE>*/
+(function(){
+'use strict';
+if(window.REPIce) return;
+var KCFG='REP_turn_v1', KBOX='REP_turn_box_v1', KCACHE='REP_turn_cache_v1';
+var STUN=[ { urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }, { urls:'stun:stun.cloudflare.com:3478' } ];
+var ULTIMI=null;          /* server dell'ultima risoluzione (per passarli ai telefoni) */
+
+function leggi(k){ try { var o=JSON.parse(localStorage.getItem(k)||'null'); return (o && typeof o==='object')? o : null; } catch(e){ return null; } }
+function scrivi(k,o){ try { if(o==null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(o)); } catch(e){} }
+
+/* il vecchio TURN pubblico (credenziali a tempo con segreto condiviso) */
+function openRelay(){
+  return new Promise(function(ok){
+    try {
+      if(!(window.crypto && crypto.subtle && window.TextEncoder)) return ok([]);
+      var user=String(Math.floor(Date.now()/1000)+12*3600), enc=new TextEncoder();
+      crypto.subtle.importKey('raw', enc.encode('openrelayprojectsecret'), {name:'HMAC',hash:'SHA-1'}, false, ['sign'])
+        .then(function(k){ return crypto.subtle.sign('HMAC', k, enc.encode(user)); })
+        .then(function(sig){
+          var b=new Uint8Array(sig), s=''; for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
+          ok([{ urls:['turn:staticauth.openrelay.metered.ca:80','turn:staticauth.openrelay.metered.ca:443',
+                      'turn:staticauth.openrelay.metered.ca:443?transport=tcp','turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
+                username:user, credential:btoa(s) }]);
+        }).catch(function(){ ok([]); });
+    } catch(e){ ok([]); }
+  });
+}
+function conTempo(p, ms){ return Promise.race([p, new Promise(function(_,ko){ setTimeout(function(){ ko(new Error('tempo scaduto')); }, ms); })]); }
+function pulisci(arr){
+  return (Array.isArray(arr)? arr : []).filter(function(s){ return s && s.urls; }).map(function(s){
+    var o={ urls:s.urls }; if(s.username) o.username=String(s.username); if(s.credential) o.credential=String(s.credential); return o;
+  });
+}
+/* server scelti dall'utente: Metered (chiave) o manuale */
+function personali(cfg){
+  cfg=cfg||leggi(KCFG);
+  if(!cfg || !cfg.tipo || cfg.tipo==='auto') return Promise.resolve([]);
+  if(cfg.tipo==='expressturn'){
+    /* ExpressTURN, piano gratuito: 1000 GB al mese, solo email e password,
+       nessuna carta. Utente e password fissi, presi dalla loro pagina. */
+    var h=String(cfg.host||'relay1.expressturn.com').trim().replace(/^turns?:/i,'').replace(/:\d+.*$/,'') || 'relay1.expressturn.com';
+    if(!cfg.user || !cfg.pass) return Promise.resolve([]);
+    return Promise.resolve([{ urls:['turn:'+h+':3478?transport=udp','turn:'+h+':3478?transport=tcp','turn:'+h+':80?transport=tcp','turns:'+h+':443?transport=tcp'],
+                              username:String(cfg.user), credential:String(cfg.pass) }]);
+  }
+  if(cfg.tipo==='manuale'){
+    var urls=String(cfg.urls||'').split(/[\s,;]+/).filter(function(u){ return /^turns?:/i.test(u); });
+    return Promise.resolve(urls.length? [{ urls:urls, username:String(cfg.user||''), credential:String(cfg.pass||'') }] : []);
+  }
+  if(cfg.tipo==='cloudflare'){
+    /* Cloudflare: la chiave TURN resta nel box; si generano credenziali che
+       scadono (24 h) e si rinnovano a metà. Due strade: chiamata diretta
+       (se Cloudflare accetta il browser) o un Worker gratuito che fa da tramite. */
+    var kid=String(cfg.kid||'').trim(), tok=String(cfg.tok||'').trim();
+    var wurl=String(cfg.worker||'').trim(), wpass=String(cfg.wpass||'');
+    if(!wurl && (!kid || !tok)) return Promise.resolve([]);
+    var firmaCF=wurl? 'w:'+wurl : 'k:'+kid;
+    var cc=leggi(KCACHE);
+    if(cc && cc.cf===firmaCF && cc.scade && Date.now() < cc.scade && cc.s && cc.s.length) return Promise.resolve(cc.s);
+    if(typeof fetch!=='function') return Promise.resolve([]);
+    var TTL=86400;
+    var req = wurl
+      ? fetch(wurl, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-rep-pass':wpass }, body:JSON.stringify({ ttl:TTL }) })
+      : fetch('https://rtc.live.cloudflare.com/v1/turn/keys/'+encodeURIComponent(kid)+'/credentials/generate-ice-servers',
+              { method:'POST', headers:{ 'Authorization':'Bearer '+tok, 'Content-Type':'application/json' }, body:JSON.stringify({ ttl:TTL }) });
+    return conTempo(req.then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }), 9000)
+      .then(function(j){
+        var s=pulisci(j && j.iceServers).map(function(x){
+          /* la porta 53 i browser la bloccano: si toglie per non aspettare a vuoto */
+          var u=[].concat(x.urls).filter(function(v){ return !/:53(\?|$)/.test(v); });
+          x.urls=u; return x;
+        }).filter(function(x){ return x.urls.length; });
+        if(s.length) scrivi(KCACHE, { cf:firmaCF, t:Date.now(), scade:Date.now()+TTL*500, s:s });
+        return s;
+      })
+      .catch(function(e){
+        if(cc && cc.cf===firmaCF && cc.s && Date.now() < cc.t+TTL*1000) return cc.s;   /* ancora valide */
+        var m=(e && e.message)||'errore';
+        if(!wurl && /Failed to fetch|NetworkError|Load failed|TypeError/i.test(m+' '+(e && e.name)))
+          m='Cloudflare non accetta la chiamata dal browser: usa il Worker';
+        throw new Error(m);
+      });
+  }
+  if(cfg.tipo==='metered'){
+    var app=String(cfg.app||'').trim().replace(/^https?:\/\//,'').replace(/\.metered\.live.*$/,'');
+    var key=String(cfg.key||'').trim();
+    if(!app || !key) return Promise.resolve([]);
+    var c=leggi(KCACHE);
+    if(c && c.app===app && c.key===key && Date.now()-c.t < 6*3600e3 && c.s && c.s.length) return Promise.resolve(c.s);
+    if(typeof fetch!=='function') return Promise.resolve([]);
+    var u='https://'+encodeURIComponent(app)+'.metered.live/api/v1/turn/credentials?apiKey='+encodeURIComponent(key);
+    return conTempo(fetch(u).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }), 8000)
+      .then(function(j){ var s=pulisci(j); if(s.length) scrivi(KCACHE, { app:app, key:key, t:Date.now(), s:s }); return s; })
+      .catch(function(e){ if(c && c.s && c.app===app) return c.s; throw e; });
+  }
+  return Promise.resolve([]);
+}
+/* tutti i server, nell'ordine: scelti dall'utente, ricevuti dal box, pubblico, STUN */
+function risolvi(){
+  return personali().catch(function(){ return []; }).then(function(mie){
+    var box=leggi(KBOX), dalBox=(box && box.s && Date.now()-box.t < 7*86400e3)? pulisci(box.s) : [];
+    return openRelay().then(function(pub){
+      var tutti=STUN.concat(mie, dalBox, pub);
+      ULTIMI={ mie:mie, dalBox:dalBox };
+      return tutti;
+    });
+  });
+}
+/* stessa firma della vecchia repIce: cb(config per Peer / RTCPeerConnection) */
+window.REPIce=function(cb){
+  risolvi().then(function(s){ cb({ iceServers:s, iceCandidatePoolSize:2 }); })
+           .catch(function(){ cb({ iceServers:STUN.slice() }); });
+};
+/* PROVA: chiede a ogni server un «indirizzo di inoltro» (candidato relay).
+   Se arriva, quel server può portare il video anche su rete mobile. */
+window.REPIceProva=function(servers, ms){
+  ms=ms||8000;
+  return new Promise(function(ok){
+    var t0=Date.now(), tipi={}, pc;
+    try { pc=new RTCPeerConnection({ iceServers:servers, iceTransportPolicy:'all' }); }
+    catch(e){ ok({ relay:false, errore:e.message, tipi:[] }); return; }
+    var fine=false;
+    function chiudi(){ if(fine) return; fine=true; try { pc.close(); } catch(e){}
+      ok({ relay:!!tipi.relay, srflx:!!tipi.srflx, tipi:Object.keys(tipi), ms:Date.now()-t0 }); }
+    pc.onicecandidate=function(ev){
+      if(!ev.candidate){ chiudi(); return; }
+      var m=/ typ (\w+)/.exec(ev.candidate.candidate||''); if(m) tipi[m[1]]=1;
+      if(tipi.relay) chiudi();
+    };
+    try { pc.createDataChannel('prova'); } catch(e){}
+    pc.createOffer().then(function(o){ return pc.setLocalDescription(o); }).catch(function(){ chiudi(); });
+    setTimeout(chiudi, ms);
+  });
+};
+window.REPIceInfo={ leggi:leggi, scrivi:scrivi, personali:personali, risolvi:risolvi, openRelay:openRelay,
+  ultimi:function(){ return ULTIMI; }, KCFG:KCFG, KBOX:KBOX, KCACHE:KCACHE, STUN:STUN };
+})();
+/*</ICE-COMUNE>*/
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRASMETTITORE v5.1 — MIGLIORIE
+
+   1. NIENTE BUCHI NELLA TRACCIA DEL BOX. Se la linea cade (galleria,
+      valle senza campo, relay che si riaggancia), i punti GPS registrati
+      nel frattempo restano in coda sul telefono. Appena il box torna
+      raggiungibile partono da soli, nell'ordine giusto, a piccoli gruppi
+      per non intasare la linea. Prima andavano persi per il live: il box
+      li riceveva solo a fine giornata con 📤.
+   2. STATO DELLA LINEA SEMPRE VISIBILE: pallino verde/giallo/rosso, da
+      quanti secondi il box non risponde, canale diretto o relay, punti in
+      coda.
+   3. GPS PERSO: se durante la registrazione il segnale sparisce per più
+      di 10 s lo dice a schermo e lo manda al box (in macchina nessuno
+      guarda il telefono). Quando torna, lo dice.
+   4. BATTERIA (dove il telefono la comunica, Android): percentuale sempre
+      a schermo, avviso a schermo e al box al 20% e al 10%.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+
+/* ── 1. coda dei punti ── */
+var CODA = window.CODA = { q: [], max: 30000, persi: 0, recuperati: 0, inRecupero: false };
+window.txPunto = function(m){
+  if(TX.on && !CODA.q.length){ if(txSend(m)){ REC.sent++; return; } }
+  if(TX.want){
+    CODA.q.push(m);
+    if(CODA.q.length > CODA.max){ CODA.q.shift(); CODA.persi++; }
+  }
+};
+setInterval(function(){
+  if(!CODA.q.length){
+    if(CODA.inRecupero){
+      CODA.inRecupero = false;
+      st('st-conn', '✅ Recuperati ' + CODA.recuperati + ' punti rimasti indietro: la traccia al box è completa.', 'ok');
+      CODA.recuperati = 0;
+    }
+    return;
+  }
+  if(!TX.on) return;
+  CODA.inRecupero = true;
+  var n = 0;
+  while(CODA.q.length && n < 40){
+    if(!txSend(CODA.q[0])) break;
+    CODA.q.shift(); REC.sent++; CODA.recuperati++; n++;
+  }
+  var e = $('sent'); if(e) e.textContent = REC.sent;
+}, 250);
+
+/* STACCA volontario: la coda non serve più */
+var conn0 = window.doConnect;
+window.doConnect = function(){
+  var eraCollegato = TX.on || TX.want;
+  var r = conn0.apply(this, arguments);
+  if(eraCollegato && !TX.want){ CODA.q.length = 0; CODA.inRecupero = false; CODA.recuperati = 0; }
+  return r;
+};
+
+/* ── 3. GPS perso ── */
+var GPSW = { last: 0, lost: false };
+try {
+  var geo = navigator.geolocation;
+  if(geo && geo.watchPosition){
+    var wp = geo.watchPosition.bind(geo);
+    geo.watchPosition = function(ok, err, opt){
+      GPSW.last = Date.now(); GPSW.lost = false;
+      return wp(function(pos){
+        GPSW.last = Date.now();
+        if(GPSW.lost){
+          GPSW.lost = false;
+          window._stHold = 0;
+          st('st-gps', '✅ GPS di nuovo agganciato: la registrazione continua.', 'ok');
+          window._stHold = Date.now() + 6000;
+          try { txSend({ k: 'diag', s: '✅ GPS di nuovo agganciato' }); } catch(e){}
+        }
+        return ok(pos);
+      }, err, opt);
+    };
+  }
+} catch(e){}
+
+/* ── 4. batteria ── */
+var BATT = { liv: null, carica: false, avvisato: 100 };
+try {
+  if(navigator.getBattery) navigator.getBattery().then(function(b){
+    var agg = function(){
+      BATT.liv = Math.round(b.level * 100); BATT.carica = !!b.charging;
+      if(BATT.carica){ BATT.avvisato = 100; return; }
+      var soglia = BATT.liv <= 10 ? 10 : (BATT.liv <= 20 ? 20 : 100);
+      if(soglia < BATT.avvisato){
+        BATT.avvisato = soglia;
+        var s = '🔋 Batteria del telefono al ' + BATT.liv + '% — collega il caricatore';
+        st('st-gps', '⚠️ ' + s, 'err');
+        try { if(TX.on) txSend({ k: 'diag', s: s }); } catch(e){}
+      }
+    };
+    agg();
+    b.addEventListener('levelchange', agg);
+    b.addEventListener('chargingchange', agg);
+  }).catch(function(){});
+} catch(e){}
+
+/* ── 2. riga di stato della linea (ogni secondo) ── */
+function riga(){
+  var e = $('st-link'); if(!e) return;
+  var parti = [], cls = '';
+  if(TX.want){
+    if(TX.on){
+      var eta = Math.round((Date.now() - (TX.lastAck || Date.now())) / 1000);
+      var canale = TX.mq ? 'relay' : 'diretto';
+      if(eta <= 12){ parti.push('🟢 Box raggiungibile · canale ' + canale + ' · ultimo segnale ' + eta + ' s fa'); cls = 'ok'; }
+      else { parti.push('🟡 Nessun segnale dal box da ' + eta + ' s · canale ' + canale); cls = 'err'; }
+    } else { parti.push('🔴 Linea assente — registro sul telefono, recupero dopo'); cls = 'err'; }
+    if(CODA.q.length) parti.push('📦 in coda: ' + CODA.q.length + ' punti');
+    if(CODA.persi) parti.push('persi (coda piena): ' + CODA.persi);
+  }
+  if(REC.id !== null && GPSW.last){
+    var sg = Math.round((Date.now() - GPSW.last) / 1000);
+    if(sg > 10){
+      parti.push('⚠️ GPS perso da ' + sg + ' s');
+      cls = 'err';
+      if(!GPSW.lost){
+        GPSW.lost = true;
+        st('st-gps', '⚠️ GPS perso: nessuna posizione da ' + sg + ' s. La registrazione riprende da sola quando torna il segnale.', 'err');
+        try { if(TX.on) txSend({ k: 'diag', s: '⚠️ GPS perso da ' + sg + ' s' }); } catch(err){}
+      }
+    }
+  }
+  if(BATT.liv != null) parti.push('🔋 ' + BATT.liv + '%' + (BATT.carica ? ' ⚡' : ''));
+  var t = parti.join(' · ');
+  if(e.textContent !== t) e.textContent = t;
+  e.className = 'status' + (cls ? ' ' + cls : '');
+  e.style.display = t ? '' : 'none';
+}
+setInterval(riga, 1000);
+document.addEventListener('DOMContentLoaded', riga);
+})();
+
+/* ── 5. su telefoni stretti il pulsante CONNETTI usciva dallo schermo:
+   il campo del codice ora si restringe invece di spingerlo fuori ── */
+(function(){
+  var s = document.createElement('style');
+  s.textContent = 'input#code{min-width:0;width:0}#btn-conn{flex:0 0 auto}h1{flex-wrap:wrap;row-gap:4px}';
+  (document.head || document.documentElement).appendChild(s);
+})();
+
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRASMETTITORE v5.2 — VIDEO FLUIDO DI NUOVO
+
+   Il video a fotogrammi veniva dal server di inoltro (TURN) pubblico, che
+   non risponde più: su rete mobile la chiamata video non si apriva mai.
+   1. I server video arrivano dal box insieme al battito: chi ha messo un
+      server Cloudflare, Metered o un suo TURN nel box lo usa anche qui, senza
+      scrivere niente sul telefono. Restano anche il pubblico e lo STUN.
+   2. Quando arrivano server nuovi e il video è a fotogrammi, la chiamata
+      si rifà subito con quelli.
+   3. Piano B più fluido: fino a 5 fotogrammi al secondo sul canale
+      diretto, 3 sul relay, più piccoli; si salta un fotogramma se la
+      linea è ancora piena del precedente.
+   4. Diagnosi chiara: se il video non passa perché manca l'inoltro, il
+      telefono e il box lo dicono con la soluzione.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+var I = window.REPIceInfo;
+if(!I) return;
+
+/* ── 1. stessa porta d'ingresso per dati e video ── */
+window.repIce = function(cb){ window.REPIce(cb); };
+
+function firma(s){ try { return JSON.stringify(s); } catch(e){ return ''; } }
+var h0 = window.handleBoxMsg;
+window.handleBoxMsg = function(m){
+  try {
+    if(m && Array.isArray(m.ice) && m.ice.length){
+      var prima = I.leggi(I.KBOX);
+      var nuovi = firma(m.ice) !== firma(prima && prima.s);
+      I.scrivi(I.KBOX, { s:m.ice, t:Date.now() });
+      /* ── 2. server nuovi e video a fotogrammi: si richiama subito ── */
+      if(nuovi && VID && VID.want && VID.stream && (VID.snapT || !liveOra())) richiama('server video dal box');
+    }
+  } catch(e){}
+  return h0 ? h0.apply(this, arguments) : undefined;
+};
+function liveOra(){ return Date.now() - (VID.lastLive || 0) < (window._REP_SNAP_AFTER || 15000); }
+var ultimoRichiamo = 0;
+function richiama(perche){
+  if(Date.now() - ultimoRichiamo < 8000) return;
+  ultimoRichiamo = Date.now();
+  st('st-video', '🔁 Riaggancio il video con ' + perche + '…');
+  try { if(VID.call) VID.call.close(); } catch(e){}
+  try { if(VID.peer) VID.peer.destroy(); } catch(e){}
+  VID.call = null; VID.peer = null;
+  VID.lastDial = Date.now();
+  try { videoDial(); } catch(e){}
+}
+
+/* ── 3. fotogrammi più fitti, più piccoli, senza intasare ── */
+window._REP_SNAP_MS = 100;
+var SN = { ult:0, cv:null, inviati:0 };
+window.snapSend = function(){
+  try {
+    if(!VID.canvas || !VID.want) return;
+    var diretto = !!(TX.conn && !TX.mq && TX.conn.open !== false);
+    var passo = diretto ? 190 : 290, lato = diretto ? 480 : 320, q = diretto ? 0.5 : 0.42, max = diretto ? 60000 : 26000;
+    var now = Date.now();
+    if(now - SN.ult < passo) return;
+    if(diretto){
+      var dc = TX.conn.dataChannel || TX.conn._dc;
+      if(dc && dc.bufferedAmount > 250000) return;          // la linea è ancora piena
+    }
+    var src = VID.canvas, W = src.width, H = src.height;
+    if(!(W > 0 && H > 0)) return;
+    var k = Math.min(1, lato / Math.max(W, H));
+    if(!SN.cv) SN.cv = document.createElement('canvas');
+    var cv = SN.cv; cv.width = Math.round(W * k); cv.height = Math.round(H * k);
+    cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
+    var d = cv.toDataURL('image/jpeg', q);
+    if(d.length > max) d = cv.toDataURL('image/jpeg', q * 0.6);
+    if(d.length > max * 1.4) return;
+    SN.ult = now;
+    if(txSend({ k:'vf', d:d, t:now })) SN.inviati++;
+  } catch(e){}
+};
+
+/* ── 4. perché il video non passa ── */
+var DG = { ult:0, detto:'' };
+function controllaInoltro(){
+  if(!VID.want || !VID.call || liveOra()) return;
+  if(Date.now() - DG.ult < 45000) return;
+  var pc = VID.call.peerConnection;
+  if(!pc || !pc.getStats) return;
+  DG.ult = Date.now();
+  pc.getStats().then(function(rep){
+    var tipi = {};
+    rep.forEach(function(r){ if(r.type === 'local-candidate' && r.candidateType) tipi[r.candidateType] = 1; });
+    var s;
+    if(!tipi.relay) s = '🎥 Video fluido bloccato: nessun server di inoltro (TURN) risponde su questa rete. Nel box: 📍 GPS logger → 🎥 Server video → ExpressTURN gratuito → SALVA. Intanto mando fotogrammi.';
+    else s = '🎥 Video fluido non ancora collegato (inoltro disponibile, ritento). Intanto mando fotogrammi.';
+    if(s !== DG.detto){
+      DG.detto = s;
+      st('st-video', s, 'err');
+      try { txSend({ k:'diag', s:s + ' [ICE: ' + (pc.iceConnectionState || '?') + ' · candidati: ' + (Object.keys(tipi).join(',') || 'nessuno') + ']' }); } catch(e){}
+    }
+  }).catch(function(){});
+}
+setInterval(function(){ try { controllaInoltro(); } catch(e){} }, 5000);
+
+/* quando il fluido riparte, la diagnosi si azzera */
+setInterval(function(){ try { if(VID && liveOra() && DG.detto){ DG.detto = ''; } } catch(e){} }, 3000);
+
+window.TXVIDEO = { snap:SN, richiama:richiama, controllaInoltro:controllaInoltro };
+})();
+
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRASMETTITORE — ITALIANO / INGLESE
+
+   Interruttore IT | EN in alto; la scelta resta (reptx_lang).
+   I messaggi del telefono sono fatti di pezzi fissi più numeri e nomi:
+   si traduce la frase intera se è nota, altrimenti pezzo per pezzo
+   (i pezzi più lunghi prima). Nomi di vetture, prove e circuiti restano.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+var D = {
+/* ── schermata ── */
+'📡 REP TELEMETRIA':'📡 REP TELEMETRY','REP Telemetria':'REP Telemetry','COLLEGAMENTO AL BOX':'LINK TO THE PIT BOX',
+'NOME AUTO (es. CLIO 5)':'CAR NAME (e.g. CLIO 5)','CODICE':'CODE','CONNETTI':'CONNECT','STACCA':'DISCONNECT',
+'Inserisci il codice mostrato sul PC box (📍 GPS logger → RICEZIONE BOX).':'Enter the code shown on the pit box PC (📍 GPS logger → PIT BOX RECEPTION).',
+'KM/H':'KM/H','V MAX':'TOP SPEED','TEMPO':'TIME','PUNTI':'POINTS','INVIATI':'SENT',
+'⏹ STOP':'⏹ STOP','⬇ SCARICA CSV':'⬇ DOWNLOAD CSV',
+'🎥 VIDEO LIVE: OFF':'🎥 LIVE VIDEO: OFF','🎥 VIDEO LIVE: ':'🎥 LIVE VIDEO: ',
+'🎙 MICROFONO: OFF':'🎙 MICROPHONE: OFF','🎙 MICROFONO: ON':'🎙 MICROPHONE: ON','🎙 MICROFONO: ':'🎙 MICROPHONE: ',
+'🏁 PROVA / SPECIALE':'🏁 STAGE / SPECIAL','🚗 TRASFERIMENTO (tocca per PS)':'🚗 ROAD SECTION (tap for STAGE)',
+'🚗 Trasferimento':'🚗 Road section',' — tocca per TRASFERIMENTO':' — tap for ROAD SECTION',
+'📷 SCAN CODICI: OFF':'📷 CODE SCAN: OFF','📷 SCAN CODICI: ON':'📷 CODE SCAN: ON',
+'📐 FORMATO: ORIZZONTALE':'📐 FORMAT: LANDSCAPE','📐 FORMATO: VERTICALE':'📐 FORMAT: PORTRAIT','📐 FORMATO: ':'📐 FORMAT: ',
+'ORIZZONTALE':'LANDSCAPE','VERTICALE':'PORTRAIT',
+'💾 SALVA VIDEO':'💾 SAVE VIDEO','💾 SALVA VIDEO (':'💾 SAVE VIDEO (',
+'🔒 BLOCCA SCHERMO':'🔒 LOCK SCREEN','🗂 REGISTRAZIONI SUL TELEFONO':'🗂 RECORDINGS ON THE PHONE',
+'⟳ SENSORI':'⟳ SENSORS','Prove salvate:':'Saved stages:','CHIUDI':'CLOSE','annulla':'cancel','🗑 CANCELLA':'🗑 DELETE',
+'Registra sempre anche in locale: se cade la connessione i dati non si perdono.':'It always records locally too: if the connection drops, no data is lost.',
+'Tieni lo schermo acceso (ci pensa la pagina se il telefono lo permette).':'Keep the screen on (the page does it if the phone allows).',
+/* ── collegamento ── */
+'Connessione…':'Connecting…','Collegato al box — premi START.':'Connected to the pit box — press START.',
+'Collegato al box via relay — premi START.':'Connected to the pit box via relay — press START.','Scollegato.':'Disconnected.',
+'Inserisci il codice del box.':'Enter the pit box code.','Prima inserisci il codice del box.':'Enter the pit box code first.',
+'Rete diretta bloccata: passo dal relay…':'Direct network blocked: switching to the relay…',
+'Relay non caricabile: controlla internet.':'Relay can\'t be loaded: check the internet.','Nessun relay raggiungibile.':'No relay reachable.',
+'Canale diretto perso: passo al relay…':'Direct channel lost: switching to the relay…','Errore canale diretto: passo al relay…':'Direct channel error: switching to the relay…',
+'🔁 Canale diretto muto: passo al relay…':'🔁 Direct channel silent: switching to the relay…',
+'🔁 Box silenzioso: ricollego (stesso codice)…':'🔁 Pit box silent: reconnecting (same code)…',
+'PeerJS non caricabile: controlla internet.':'PeerJS can\'t be loaded: check the internet.','PeerJS non caricabile.':'PeerJS can\'t be loaded.',
+'Codice errato o box non attivo':'Wrong code or pit box not active','Internet non raggiungibile':'Internet unreachable',
+'Browser non compatibile':'Browser not compatible','Errore: ':'Error: ','🎛 Comando dal box eseguito: ':'🎛 Pit box command executed: ',
+'⚠️ Telefono sospeso per ~':'⚠️ Phone suspended for ~',' s (schermo spento?). Controlla Blocco automatico: MAI. Ripristino tutto…':' s (screen off?). Check Auto-Lock: NEVER. Restoring everything…',
+'Prima collegati al box (codice + CONNETTI), poi 📤.':'Connect to the pit box first (code + CONNECT), then 📤.',
+'Invio "':'Sending "','" inviata al box (':'" sent to the pit box (','Invio interrotto: connessione persa.':'Sending interrupted: connection lost.',
+/* ── GPS e registrazione ── */
+'GPS non disponibile in questo browser.':'GPS not available in this browser.','In attesa del segnale GPS… (consenti la posizione)':'Waiting for the GPS signal… (allow location)',
+'Registro e trasmetto.':'Recording and transmitting.','Registro (solo locale: box non collegato).':'Recording (local only: pit box not connected).',
+'Errore GPS: ':'GPS error: ','Fermato: ':'Stopped: ',' punti, ':' points, ',' km, Vmax ':' km, Vmax ',' km/h. Il box ha salvato il percorso.':' km/h. The pit box saved the route.',
+'Fermato (nessun punto).':'Stopped (no points).',' punti).':' points).',' punti':' points',
+'♻ Registrazione interrotta recuperata dall\'ultima bozza.':'♻ Interrupted recording recovered from the last draft.',' (recuperata)':' (recovered)',
+'Attendi il segnale GPS (premi START).':'Wait for the GPS signal (press START).',
+/* ── schermo bloccato / acceso ── */
+'Schermo bloccato':'Screen locked','tieni premuto 5 secondi per sbloccare':'hold for 5 seconds to unlock',
+'lo schermo deve restare ACCESO':'the screen must stay ON','⚠️ NON premere il tasto laterale:':'⚠️ DO NOT press the side button:',
+'(abbassa la luminosità per scaldare meno)':'(lower the brightness to reduce heat)',
+'Schermo tenuto acceso: ':'Screen kept on: ','wake lock attivo':'wake lock active','video-loop attivo':'video loop active',
+'NON DISPONIBILE':'NOT AVAILABLE',' — imposta Blocco automatico: MAI!':' — set Auto-Lock: NEVER!',
+'messaggio dal box — tocca per chiudere':'message from the pit box — tap to close',
+/* ── video, microfono ── */
+'Avvio camera…':'Starting camera…','Camera negata.':'Camera denied.','Camera non disponibile.':'Camera not available.',
+'Camera non disponibile in questo browser.':'Camera not available in this browser.','Audio/video spenti.':'Audio/video off.',
+'Audio/video spenti (scollegato).':'Audio/video off (disconnected).','Errore video: ':'Video error: ','Errore chiamata video: ':'Video call error: ',
+'Video: ':'Video: ','Permesso camera/microfono negato o errore: ':'Camera/microphone permission denied or error: ',
+'Formato aggiornato: si applica alla prossima accensione.':'Format updated: it applies the next time it starts.',
+'Formato cambiato: riavvio la ripresa… (scegli il formato PRIMA del run: questo riavvio può richiedere un nuovo consenso)':'Format changed: restarting the capture… (choose the format BEFORE the run: this restart may ask for permission again)',
+' in onda verso il box · REC locale attiva.':' on air to the pit box · local REC active.',' inviato al box · REC ':' sent to the pit box · REC ',
+' attivo — camera già autorizzata, nessun nuovo consenso.':' active — camera already authorised, no new permission.',
+'⏸ In pausa — camera pronta: riattivabile anche dal box, senza consenso.':'⏸ Paused — camera ready: can be restarted from the pit box too, without permission.',
+'📡 Camera ripartita.':'📡 Camera restarted.','📡 Video fluido ripristinato.':'📡 Smooth video restored.',
+'📷 Video fluido assente: mando FOTOGRAMMI sul canale dati — il fluido tornerà da solo.':'📷 No smooth video: sending FRAMES on the data channel — smooth video will come back by itself.',
+'⚠️ Live non disponibile su questa rete — la REC locale continua, ritento da solo.':'⚠️ Live not available on this network — local REC continues, retrying by itself.',
+'⚠️ iPhone ha sospeso la camera (altra app o doppio accesso)…':'⚠️ iPhone suspended the camera (another app or double access)…',
+'❌ Camera: ':'❌ Camera: ','❌ La camera non dà immagini: chiudi le altre app che la usano (o riavvia Safari) e ripremi 🎥.':'❌ The camera gives no picture: close the other apps using it (or restart Safari) and press 🎥 again.',
+'🔁 Camera senza immagini (':'🔁 Camera without picture (','): la riavvio (':'): restarting it (','🔁 Riaggancio il canale ':'🔁 Re-attaching the channel ',
+' · riaggancio in corso':' · re-attaching','Sorgente ok — collego ':'Source OK — connecting ',' al box…':' to the pit box…',' · canale: ':' · channel: ',
+'🎙 Microfono sacrificato per salvare il video (riattivalo piu tardi se vuoi riprovare).':'🎙 Microphone dropped to save the video (turn it back on later if you want to retry).',
+'🎙 Richiesta con microfono fallita: continuo SOLO video.':'🎙 Request with microphone failed: continuing with video ONLY.',
+'nessuna traccia':'no track','traccia terminata':'track ended','traccia silenziata da iOS':'track muted by iOS','zero fotogrammi':'zero frames',
+' MB · camera: ':' MB · camera: ',
+/* ── sensori ── */
+'Sensori attivi — assi in calibrazione: una frenata o accelerazione decisa e partono le g.':'Sensors active — axes calibrating: one firm braking or acceleration and the g readings start.',
+'Assi calibrati: g attive.':'Axes calibrated: g readings active.','Sensori di movimento non supportati: solo GPS.':'Motion sensors not supported: GPS only.',
+'Sensori fermi: premi ⟳ SENSORI (e consenti il movimento).':'Sensors stopped: press ⟳ SENSORS (and allow motion).',
+'Serve un tocco per attivare i sensori: premi ⟳ SENSORI.':'A tap is needed to activate the sensors: press ⟳ SENSORS.',
+'Permesso movimento negato: premi ⟳ SENSORI per riprovare.':'Motion permission denied: press ⟳ SENSORS to retry.',
+'FRENO':'BRAKE','GAS':'THROTTLE','⚠️ URTO RILEVATO ':'⚠️ IMPACT DETECTED ',' g — segnalato al box.':' g — reported to the pit box.',
+'Frenata 100-0':'Braking 100-0',
+/* ── giri ── */
+'🏁 Giro ':'🏁 Lap ',' — BEST!':' — BEST!',' — MIGLIORE!':' — BEST!',' — 🏆 RECORD PERSONALE!':' — 🏆 PERSONAL BEST!',' Record personale: ':' Personal best: ',
+'🏁 Circuito: ':'🏁 Circuit: ',' riconosciuto — traguardo in memoria: cronometro pronto.':' recognised — finish line in memory: timer ready.',
+' riconosciuta (':' recognised (',' m dalla partenza) — cronometro pronto':' m from the start) — timer ready',
+'🏁 Traguardo fissato qui: cronometro attivo (memorizzato per ':'🏁 Finish line set here: timer active (saved for ','questo tracciato':'this track',
+' — il traguardo si impara al primo passaggio lanciato.':' — the finish line is learnt on the first flying pass.',
+' · best ':' · best ',' · ultimo ':' · last ',' · teorico ':' · theoretical ',' · passaggi ':' · passes ',' · rif ':' · ref ',' · riferimento ':' · reference ',
+'Circuito':'Circuit',
+/* ── prove speciali e trasferimenti ── */
+'🏁 Prova attiva: ':'🏁 Active stage: ','Nessuna prova attiva.':'No active stage.','Nessuna prova impostata.':'No stage set.','Nessuna prova.':'No stages.',
+'Nome della prova:':'Stage name:','Prima segna la partenza.':'Mark the start first.','Prova cancellata.':'Stage deleted.','Cancellare la prova "':'Delete the stage "',
+'" (punti e tempi)?':'" (points and times)?','🚦 SEGNA PARTENZA (qui)':'🚦 MARK START (here)','🏁 SEGNA ARRIVO (qui)':'🏁 MARK FINISH (here)',
+'➕ SEGNA SPLIT A MANO (durante la prova)':'➕ MARK SPLIT BY HAND (during the stage)','⏱ INTERTEMPI AUTOMATICI':'⏱ AUTOMATIC SPLITS',
+'⏱ INTERTEMPI AUTOMATICI: ':'⏱ AUTOMATIC SPLITS: ','⏱ Intertempi automatici: ':'⏱ Automatic splits: ','ogni ':'every ','disattivati':'disabled',
+'. Si applicano dalla prossima discesa.':'. They apply from the next run.',
+'Intertempi automatici ogni quanti km? (0 = solo quelli segnati a mano)':'Automatic splits every how many km? (0 = only the ones marked by hand)',
+' intertempi creati in automatico (':' splits created automatically (',' km): attivi dalla prossima discesa.':' km): active from the next run.',
+' (automatici)':' (automatic)',' (automatico)':' (automatic)',' · intertempi ':' · splits ',' · partenza ':' · start ',' · arrivo ':' · finish ',
+'Gli split si segnano DURANTE la prova.':'Splits are marked DURING the stage.','➕ Split a ':'➕ Split at ','⏱ Split ':'⏱ Split ',
+'🚦 PARTENZA di "':'🚦 START of "','🏁 PARTENZA di "':'🏁 START of "','🏁 ARRIVO di "':'🏁 FINISH of "',
+'" memorizzata. Ora vai all\'arrivo e premi SEGNA ARRIVO.':'" saved. Now go to the finish and press MARK FINISH.',
+'" memorizzato. La prova è pronta: al prossimo passaggio sulla partenza il cronometro parte da solo.':'" saved. The stage is ready: next time you pass the start the timer starts by itself.',
+'🚦 VIA! ':'🚦 GO! ',' chiuso: ':' closed: ','PROVA IN CORSO':'STAGE IN PROGRESS','in attesa del passaggio sulla partenza':'waiting to pass the start',
+'stato: ':'status: ','in corso: ':'in progress: ','riferimento: ':'reference: ','non impostato':'not set',
+'Segna partenza e arrivo una volta: il software li ricorda sul GPS. Gli ':'Mark start and finish once: the software remembers them on GPS. The ',
+'intertempi li crea da solo':'splits are created automatically',
+' alla prima discesa (ogni km); puoi comunque aggiungerne a mano nei punti che vuoi.':' on the first run (every km); you can still add some by hand wherever you want.',
+'KM DI GIORNATA':'KM TODAY','🚦 prove speciali: ':'🚦 special stages: ','🚗 trasferimenti: ':'🚗 road sections: ',
+' km · trasf. ':' km · road ',' · totali PS ':' · stage totals ',' km · Vmax ':' km · Vmax ',
+'🔄 AZZERA KM DI GIORNATA':'🔄 RESET TODAY\'S KM','Azzerare i totali km di giornata (PS e trasferimenti)?':'Reset today\'s km totals (stages and road sections)?',
+'Totali km azzerati.':'Km totals reset.',
+'🛞 TRENO GOMME':'🛞 TYRE SET','🛞 TRENO GOMME: ':'🛞 TYRE SET: ','🛞 Treno attivo: ':'🛞 Active set: ',' — i km si sommano a questo set':' — km add up to this set',
+'Treno gomme montato (es. SET A, SLICK 2, PIOGGIA):':'Tyre set fitted (e.g. SET A, SLICK 2, RAIN):','Treno gomme non impostato.':'Tyre set not set.',
+' km memorizzato.':' km saved.',
+/* ── controllo orario ── */
+'⏰ CONTROLLO ORARIO':'⏰ TIME CONTROL','⏰ IMPOSTA CONTROLLO ORARIO':'⏰ SET TIME CONTROL','⏰ CO alle ':'⏰ TC at ','⏰ Prossimo CO alle ':'⏰ Next TC at ',
+'⏰ Attenzione: per il CO delle ':'⏰ Warning: for the TC at ',' serve una media di ':' you need an average of ','⏰ CO IN RITARDO ':'⏰ TC LATE ',
+'IN RITARDO di ':'LATE by ','mancano ':'left: ','media necessaria: ':'average needed: ',
+'Orario del prossimo controllo (CO) — formato HH:MM':'Time of the next time control (TC) — format HH:MM',
+'Chilometri da percorrere fino al CO (0 = usa solo l\'orario)':'Km to drive to the TC (0 = use the time only)',
+'Orario non valido (usa HH:MM).':'Invalid time (use HH:MM).','Controllo orario disattivato.':'Time control disabled.','Valore non valido.':'Invalid value.',
+/* ── scanner e magazzino ── */
+'📷 Scanner: inquadra il codice (tocca lo schermo per uscire)…':'📷 Scanner: frame the code (tap the screen to exit)…','Scanner chiuso.':'Scanner closed.','Scanner spento.':'Scanner off.',
+'📷 Spegni prima il VIDEO LIVE: iPhone consente una sola camera per volta.':'📷 Turn off LIVE VIDEO first: iPhone allows only one camera at a time.',
+'📦 PEZZO SCANSIONATO':'📦 SCANNED PART','📦 INVIA AL MAGAZZINO':'📦 SEND TO STOCK','solo codice':'code only','Codice':'Code','Nome pezzo':'Part name',
+'es. Pastiglie freno ant.':'e.g. Front brake pads','Categoria':'Category','Qtà':'Qty','Motore':'Engine','Sospensioni':'Suspension','Freni':'Brakes',
+'Trasmissione':'Transmission','Carrozzeria':'Bodywork','Elettronica':'Electronics','Gomme':'Tyres','Altro':'Other',
+'📤 Codice inviato al box: ':'📤 Code sent to the pit box: ','📦 Inviato al magazzino: ':'📦 Sent to stock: ',
+/* ── errori ── */
+'⚠️ ERRORE APP: ':'⚠️ APP ERROR: ','⚠️ ERRORE APP (promise): ':'⚠️ APP ERROR (promise): ',
+/* ── v5.1 ── */
+'✅ Recuperati ':'✅ Recovered ',' punti rimasti indietro: la traccia al box è completa.':' points left behind: the track at the pit box is complete.',
+'✅ GPS di nuovo agganciato: la registrazione continua.':'✅ GPS locked again: recording continues.',
+'🔋 Batteria del telefono al ':'🔋 Phone battery at ','% — collega il caricatore':'% — plug in the charger',
+'🟢 Box raggiungibile · canale ':'🟢 Pit box reachable · channel ','diretto':'direct',' · ultimo segnale ':' · last signal ',' s fa':' s ago',
+'🟡 Nessun segnale dal box da ':'🟡 No signal from the pit box for ','🔴 Linea assente — registro sul telefono, recupero dopo':'🔴 No connection — recording on the phone, will catch up later',
+'📦 in coda: ':'📦 queued: ','persi (coda piena): ':'lost (queue full): ','⚠️ GPS perso da ':'⚠️ GPS lost for ',
+'⚠️ GPS perso: nessuna posizione da ':'⚠️ GPS lost: no position for ',' s. La registrazione riprende da sola quando torna il segnale.':' s. Recording resumes by itself when the signal returns.',
+'trasmettitore v':'transmitter v',
+/* ── video v5.2 ── */
+'🎥 Video fluido bloccato: nessun server di inoltro (TURN) risponde su questa rete. Nel box: 📍 GPS logger → 🎥 Server video → ExpressTURN gratuito → SALVA. Intanto mando fotogrammi.':'🎥 Smooth video blocked: no relay server (TURN) answers on this network. On the pit box: 📍 GPS logger → 🎥 Video server → free ExpressTURN → SAVE. Sending frames meanwhile.',
+'🎥 Video fluido non ancora collegato (inoltro disponibile, ritento). Intanto mando fotogrammi.':'🎥 Smooth video not connected yet (relay available, retrying). Sending frames meanwhile.',
+'🔁 Riaggancio il video con server video dal box…':'🔁 Reconnecting the video with the video server from the pit box…'
+};
+var KEY = 'reptx_lang';
+var L = 'it'; try { L = localStorage.getItem(KEY) === 'en' ? 'en' : 'it'; } catch(e){}
+var chiavi = Object.keys(D).filter(function(k){ return D[k] !== k && /[A-Za-zÀ-ÿ]{2}/.test(k) && k.replace(/\s/g, '').length >= 3; })
+  .sort(function(a, b){ return b.length - a.length; });
+var RX = new RegExp(chiavi.map(function(k){ return k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|'), 'g');
+var cache = new Map();
+function tr(s){
+  if(!s || !/[A-Za-zÀ-ÿ]{2}/.test(s)) return null;
+  if(cache.has(s)) return cache.get(s);
+  var t = s.trim(), r;
+  if(D[t] !== undefined) r = s.replace(t, D[t]);
+  else { r = s.replace(RX, function(m){ return D[m]; }); if(r === s) r = null; }
+  if(cache.size > 5000) cache.clear();
+  cache.set(s, r);
+  return r;
+}
+var TXT = new WeakMap(), ATT = new WeakMap();
+var ATTR = ['placeholder', 'title', 'aria-label'];
+function salta(el){
+  for(var e = el; e && e.nodeType === 1; e = e.parentNode){
+    if(/^(SCRIPT|STYLE|TEXTAREA)$/.test(e.nodeName) || e.id === 'lang-sw' || e.id === 'pitboard-t') return true;
+  }
+  return false;
+}
+function testo(n){
+  var p = n.parentNode; if(!p || salta(p)) return;
+  var v = n.nodeValue, rec = TXT.get(n);
+  if(rec && v === rec.en) return;
+  if(L !== 'en'){ if(rec) TXT.delete(n); return; }
+  var en = tr(v); if(en == null || en === v){ if(rec) TXT.delete(n); return; }
+  TXT.set(n, { it: v, en: en }); n.nodeValue = en;
+}
+function attr(el){
+  if(!el.getAttribute || salta(el)) return;
+  var m = ATT.get(el);
+  ATTR.forEach(function(a){
+    if(!el.hasAttribute(a)) return;
+    var v = el.getAttribute(a), rec = m && m[a];
+    if(rec && v === rec.en) return;
+    if(L !== 'en') return;
+    var en = tr(v); if(en == null || en === v) return;
+    if(!m){ m = {}; ATT.set(el, m); }
+    m[a] = { it: v, en: en }; el.setAttribute(a, en);
+  });
+}
+function visita(r){
+  if(!r) return;
+  if(r.nodeType === 3){ testo(r); return; }
+  if(r.nodeType !== 1) return;
+  if(salta(r)) return;
+  attr(r);
+  var w = document.createTreeWalker(r, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT), n;
+  while((n = w.nextNode())){ if(n.nodeType === 3) testo(n); else attr(n); }
+}
+function ripristina(){
+  var w = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT), n;
+  while((n = w.nextNode())){
+    if(n.nodeType === 3){ var r = TXT.get(n); if(r){ if(n.nodeValue === r.en) n.nodeValue = r.it; TXT.delete(n); } }
+    else { var m = ATT.get(n); if(m){ Object.keys(m).forEach(function(a){ if(n.getAttribute(a) === m[a].en) n.setAttribute(a, m[a].it); }); ATT.delete(n); } }
+  }
+}
+try {
+  new MutationObserver(function(mm){
+    if(L !== 'en') return;
+    mm.forEach(function(m){
+      try {
+        if(m.type === 'characterData') testo(m.target);
+        else if(m.type === 'attributes') attr(m.target);
+        else m.addedNodes.forEach(visita);
+      } catch(e){}
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTR });
+} catch(e){}
+['alert', 'confirm', 'prompt'].forEach(function(f){
+  var o = window[f]; if(typeof o !== 'function') return;
+  window[f] = function(msg){ var a = Array.prototype.slice.call(arguments); if(L === 'en' && typeof msg === 'string'){ var t = tr(msg); if(t != null) a[0] = t; } return o.apply(window, a); };
+});
+function interruttore(){
+  var sw = document.getElementById('lang-sw');
+  if(!sw){
+    var h = document.querySelector('h1'); if(!h) return;
+    sw = document.createElement('span'); sw.id = 'lang-sw';
+    sw.style.cssText = 'display:inline-flex;border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-left:8px;flex:0 0 auto';
+    ['it', 'en'].forEach(function(l){
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = l.toUpperCase(); b.dataset.l = l;
+      b.style.cssText = 'border:0;border-radius:0;padding:5px 9px;font-size:11px;font-weight:800;letter-spacing:.05em';
+      b.onclick = function(){ imposta(l); };
+      sw.appendChild(b);
+    });
+    h.appendChild(sw);
+  }
+  Array.prototype.forEach.call(sw.querySelectorAll('button'), function(b){
+    var on = b.dataset.l === L;
+    b.style.background = on ? '#0a84ff' : 'var(--bg3)'; b.style.color = on ? '#fff' : 'var(--dim)';
+  });
+}
+function imposta(l){
+  l = l === 'en' ? 'en' : 'it';
+  if(l !== L){
+    L = l; try { localStorage.setItem(KEY, l); } catch(e){}
+    document.documentElement.lang = l;
+    if(l === 'en') visita(document.body); else ripristina();
+  }
+  interruttore();
+}
+window.TXLANG = { imposta: imposta, lingua: function(){ return L; }, tr: function(s){ var r = tr(s); return r == null ? s : r; } };
+function avvia(){ interruttore(); if(L === 'en'){ document.documentElement.lang = 'en'; visita(document.body); } }
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', avvia); else avvia();
+})();
+
 </script>
 </body>
 </html>
