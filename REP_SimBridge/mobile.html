@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#07090d">
+<title>REP Sim Live</title>
+<style>
+:root{--bg:#07090d;--bg2:#10141b;--bg3:#181d27;--bd:#262c39;--tx:#eef0f4;--dim:#8a91a2;--acc:#e8421a;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;--blu:#0a84ff;--cya:#00e5ff;--pur:#bf5af2}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--tx);font-family:-apple-system,system-ui,Segoe UI,sans-serif;min-height:100dvh;padding:env(safe-area-inset-top) 10px env(safe-area-inset-bottom)}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;align-items:center;gap:8px;padding:8px 2px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--red);flex:0 0 auto}.dot.on{background:var(--grn);box-shadow:0 0 8px var(--grn)}
+#titolo{font-weight:800;font-size:13px;letter-spacing:.04em;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw{display:inline-flex;border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+.sw button{border:0;background:var(--bg3);color:var(--dim);font:800 11px system-ui;padding:5px 8px}.sw button.on{background:var(--blu);color:#fff}
+nav{display:flex;gap:6px;margin:4px 0 10px}
+nav button{flex:1;background:var(--bg2);border:1px solid var(--bd);color:var(--dim);border-radius:10px;padding:9px 4px;font:800 11px system-ui;letter-spacing:.06em}
+nav button.on{color:#fff;border-color:var(--acc);background:#2a1510}
+.pag{display:none}.pag.on{display:block}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:14px;padding:10px;margin-bottom:10px}
+.lbl{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--dim)}
+.riga{display:flex;gap:8px}.riga>*{flex:1}
+.big{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
+#marcia{font-size:92px;font-weight:900;line-height:.9;min-width:70px;text-align:center}
+#vel{font-size:64px;font-weight:800;line-height:.9;text-align:right}
+.u{font-size:11px;color:var(--dim);font-weight:700;letter-spacing:.1em}
+.rpm{height:12px;border-radius:6px;background:var(--bg3);overflow:hidden;margin:8px 0 4px}
+.rpm>div{height:100%;width:0;background:linear-gradient(90deg,var(--grn) 0,var(--grn) 70%,var(--yel) 85%,var(--red) 100%);transition:width .06s linear}
+.pedali{display:flex;gap:6px;height:12px}.pedali>div{flex:1;background:var(--bg3);border-radius:6px;overflow:hidden}
+.pedali i{display:block;height:100%;width:0}.pedali .g i{background:var(--grn)}.pedali .f i{background:var(--red)}
+.val{font-size:26px;font-weight:800;margin-top:2px}.val.s{font-size:18px}
+#delta{font-size:34px;font-weight:900}
+.pos{color:var(--grn)}.neg{color:var(--red)}
+.gomme{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.gomma{border-radius:10px;padding:7px;text-align:center;background:var(--bg3)}
+.gomma .t{font-size:20px;font-weight:800}.gomma .p{font-size:12px;color:var(--dim)}
+table{width:100%;border-collapse:collapse;font-size:13px}th{font-size:10px;color:var(--dim);text-align:left;padding:4px;letter-spacing:.06em}
+td{padding:6px 4px;border-top:1px solid var(--bd)}tr.me td{background:#2a1510;font-weight:800}
+canvas{width:100%;display:block;border-radius:12px;background:var(--bg2);border:1px solid var(--bd)}
+.nota{font-size:12px;color:var(--dim);line-height:1.5;padding:4px 2px}
+.btn{width:100%;background:var(--bg3);border:1px solid var(--bd);color:var(--tx);border-radius:10px;padding:11px;font:800 12px system-ui;margin-top:6px}
+.inv{color:var(--red);font-size:10px;font-weight:800}
+#fuori{display:none;text-align:center;padding:40px 16px}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span><span id="titolo">REP SIM LIVE</span>
+  <span class="sw"><button data-l="it">IT</button><button data-l="en">EN</button></span>
+</header>
+<nav>
+  <button data-p="cru" class="on" data-t="CRUSCOTTO">CRUSCOTTO</button>
+  <button data-p="cla" data-t="CLASSIFICA">CLASSIFICA</button>
+  <button data-p="map" data-t="MAPPA">MAPPA</button>
+  <button data-p="gir" data-t="GIRI">GIRI</button>
+</nav>
+<div id="fuori" class="card"><div class="val s" data-t="In attesa del gioco…">In attesa del gioco…</div>
+  <div class="nota" data-t="Il ponte è collegato: appena entri in pista i dati compaiono qui.">Il ponte è collegato: appena entri in pista i dati compaiono qui.</div></div>
+
+<section class="pag on" id="p-cru">
+  <div class="card" id="band" style="display:none;font-weight:800;font-size:20px;text-align:center;letter-spacing:1px"></div>
+  <div class="card" id="radio" style="display:none;border-color:var(--acc,#e8421a)"><div class="lbl">📻 INGEGNERE</div><div class="val s" id="radio-t" style="font-size:17px;line-height:1.25"></div></div>
+  <div class="card">
+    <div class="big"><div id="marcia" class="mono">N</div><div><div id="vel" class="mono">0</div><div class="u" style="text-align:right">KM/H</div></div></div>
+    <div class="rpm"><div id="rpm"></div></div>
+    <div class="pedali"><div class="g"><i id="gas"></i></div><div class="f"><i id="freno"></i></div></div>
+  </div>
+  <div class="card">
+    <div class="riga">
+      <div><div class="lbl" data-t="GIRO ATTUALE">GIRO ATTUALE</div><div class="val mono" id="cur">—</div></div>
+      <div style="text-align:right"><div class="lbl">DELTA</div><div id="delta" class="mono">—</div></div>
+    </div>
+    <div class="riga" style="margin-top:6px">
+      <div><div class="lbl" data-t="ULTIMO">ULTIMO</div><div class="val s mono" id="last">—</div></div>
+      <div><div class="lbl" data-t="MIGLIORE">MIGLIORE</div><div class="val s mono" id="best" style="color:var(--pur)">—</div></div>
+      <div><div class="lbl" data-t="POSIZIONE">POSIZIONE</div><div class="val s mono" id="pos">—</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="riga">
+      <div><div class="lbl" data-t="BENZINA">BENZINA</div><div class="val s mono" id="fuel">—</div></div>
+      <div><div class="lbl" data-t="PER GIRO">PER GIRO</div><div class="val s mono" id="fpl">—</div></div>
+      <div><div class="lbl" data-t="GIRI RESTANTI">GIRI RESTANTI</div><div class="val s mono" id="fgiri">—</div></div>
+    </div>
+    <div class="nota" id="fnota"></div>
+  </div>
+  <div class="card" id="elet-c" style="display:none"><div class="lbl" data-t="ELETTRONICA">ELETTRONICA</div><div class="val s mono" id="elet" style="font-size:15px;line-height:1.5"></div></div>
+  <div class="card">
+    <div class="lbl" data-t="GOMME">GOMME</div>
+    <div class="gomme" id="gomme"></div>
+    <div class="nota" id="comp"></div>
+  </div>
+  <button class="btn" id="sveglia" data-t="🔆 TIENI ACCESO LO SCHERMO">🔆 TIENI ACCESO LO SCHERMO</button>
+</section>
+
+<section class="pag" id="p-cla">
+  <div class="card"><table><thead><tr><th>P</th><th data-t="PILOTA">PILOTA</th><th data-t="GIRI">GIRI</th><th data-t="ULTIMO">ULTIMO</th><th data-t="MIGLIORE">MIGLIORE</th></tr></thead><tbody id="cla"></tbody></table>
+  <div class="nota" id="cla-nota"></div></div>
+</section>
+
+<section class="pag" id="p-map">
+  <canvas id="mappa" height="420"></canvas>
+  <div class="nota" data-t="La pista si disegna da sola mentre giri: dopo un giro completo è intera.">La pista si disegna da sola mentre giri: dopo un giro completo è intera.</div>
+</section>
+
+<section class="pag" id="p-gir">
+  <div class="card"><table><thead><tr><th>#</th><th data-t="TEMPO">TEMPO</th><th>S1</th><th>S2</th><th>S3</th><th>L</th></tr></thead><tbody id="giri"></tbody></table></div>
+</section>
+
+<script>
+'use strict';
+var EN = {'CRUSCOTTO':'DASH','CLASSIFICA':'STANDINGS','MAPPA':'MAP','GIRI':'LAPS','GIRO ATTUALE':'CURRENT LAP','ULTIMO':'LAST',
+  'MIGLIORE':'BEST','POSIZIONE':'POSITION','BENZINA':'FUEL','PER GIRO':'PER LAP','GIRI RESTANTI':'LAPS LEFT','GOMME':'TYRES','ELETTRONICA':'ELECTRONICS',
+  'PILOTA':'DRIVER','TEMPO':'TIME','In attesa del gioco…':'Waiting for the game…',
+  'Il ponte è collegato: appena entri in pista i dati compaiono qui.':'The bridge is connected: data appears here as soon as you go on track.',
+  'La pista si disegna da sola mentre giri: dopo un giro completo è intera.':'The track draws itself while you drive: after a full lap it is complete.',
+  '🔆 TIENI ACCESO LO SCHERMO':'🔆 KEEP THE SCREEN ON','🔆 SCHERMO SEMPRE ACCESO':'🔆 SCREEN ALWAYS ON',
+  'Collegamento al ponte perso: riprovo…':'Connection to the bridge lost: retrying…',
+  'Classifica completa: nomi e tempi di tutti.':'Full standings: names and times of everyone.',
+  'Questo gioco manda solo la tua auto.':'This game only sends your car.',
+  'per finire la sessione servono':'to finish the session you need','L in più':'L more','L in avanzo':'L to spare',
+  'mescola':'compound','non valido':'invalid','asciutto':'dry','pioggia':'rain','pista bagnata':'wet track','danni':'damage'};
+var L = localStorage.getItem('rep_sim_lang') || ((navigator.language || '').slice(0, 2) === 'it' ? 'it' : 'en');
+function T(s){ return L === 'en' && EN[s] ? EN[s] : s; }
+function lingua(l){
+  L = l; try { localStorage.setItem('rep_sim_lang', l); } catch(e){}
+  document.documentElement.lang = l;
+  document.querySelectorAll('[data-t]').forEach(function(e){ e.textContent = T(e.dataset.t); });
+  document.querySelectorAll('.sw button').forEach(function(b){ b.classList.toggle('on', b.dataset.l === L); });
+}
+document.querySelectorAll('.sw button').forEach(function(b){ b.onclick = function(){ lingua(b.dataset.l); }; });
+document.querySelectorAll('nav button').forEach(function(b){
+  b.onclick = function(){
+    document.querySelectorAll('nav button').forEach(function(x){ x.classList.toggle('on', x === b); });
+    document.querySelectorAll('.pag').forEach(function(p){ p.classList.toggle('on', p.id === 'p-' + b.dataset.p); });
+    if(b.dataset.p === 'map') disegnaMappa();
+  };
+});
+function $(i){ return document.getElementById(i); }
+function tempo(ms){ if(!ms || ms <= 0) return '—'; var m = Math.floor(ms / 60000), s = (ms % 60000) / 1000; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(3); }
+function secs(ms){ return ms ? (ms / 1000).toFixed(3) : '—'; }
+
+var S = { sess: {}, f: null, cars: [], giri: [], best: null, bestTraccia: null, outline: [], ultimoPunto: null, fuelLap: [] };
+
+/* ── collegamento ── */
+var ws, tent = 0;
+function collega(){
+  var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + (location.host || '127.0.0.1:8977') + '/ws';
+  try { ws = new WebSocket(url); } catch(e){ setTimeout(collega, 2000); return; }
+  ws.onopen = function(){ tent = 0; $('dot').classList.add('on'); };
+  ws.onclose = function(){ $('dot').classList.remove('on'); $('titolo').textContent = T('Collegamento al ponte perso: riprovo…'); setTimeout(collega, Math.min(5000, 800 + 400 * tent++)); };
+  ws.onmessage = function(ev){ var m; try { m = JSON.parse(ev.data); } catch(e){ return; } ricevi(m); };
+}
+function ricevi(m){
+  if(m.k === 'hello'){ if(!m.gioco){ $('fuori').style.display = 'block'; } titolo(); return; }
+  if(m.k === 's'){ S.sess = m; titolo(); return; }
+  if(m.k === 'c'){ S.cars = m.cars || []; if(vis('cla')) classifica(); return; }
+  if(m.k === 'lap'){ nuovoGiro(m); return; }
+  if(m.k === 'msg'){ radio(m); return; }
+  if(m.k === 'f'){ $('fuori').style.display = 'none'; S.f = m; pianifica(); traccia(m); }
+}
+function vis(p){ return $('p-' + p).classList.contains('on'); }
+function titolo(){
+  var s = S.sess;
+  $('titolo').textContent = s.track ? ((s.nome || '') + ' · ' + s.track + (s.car ? ' · ' + s.car : '')) : 'REP SIM LIVE';
+}
+
+/* ── cruscotto (al massimo 30 volte al secondo) ── */
+var inCoda = false;
+var tRadio = null;
+function radio(m){
+  $('radio').style.display = 'block'; $('radio-t').textContent = m.testo || '';
+  $('radio').style.background = (m.prio || 1) >= 3 ? 'rgba(255,69,58,.18)' : '';
+  if(navigator.vibrate && (m.prio || 1) >= 2) try { navigator.vibrate(180); } catch(e){}
+  clearTimeout(tRadio); tRadio = setTimeout(function(){ $('radio').style.display = 'none'; }, (m.prio || 1) >= 3 ? 25000 : 12000);
+}
+function pianifica(){ if(!inCoda){ inCoda = true; requestAnimationFrame(function(){ inCoda = false; cruscotto(); if(vis('map')) disegnaMappa(); }); } }
+function colTemp(t){ if(t == null) return 'var(--bg3)'; if(t < 65) return '#12324d'; if(t < 80) return '#1b4d3e'; if(t < 100) return '#1f5a2b'; if(t < 110) return '#5a4a12'; return '#5a1a14'; }
+function cruscotto(){
+  var f = S.f; if(!f) return;
+  $('marcia').textContent = f.gear === -1 ? 'R' : (f.gear === 0 ? 'N' : f.gear);
+  $('vel').textContent = Math.round(f.v || 0);
+  var max = f.rpmMax || S.sess.maxRpm || 8000;
+  $('rpm').style.width = Math.min(100, (f.rpm || 0) / max * 100) + '%';
+  $('gas').style.width = ((f.thr || 0) * 100) + '%';
+  $('freno').style.width = ((f.brk || 0) * 100) + '%';
+  $('cur').textContent = tempo(f.cur);
+  $('last').textContent = tempo(f.last || (S.giri.length ? S.giri[S.giri.length - 1].ms : 0));
+  $('best').textContent = tempo(f.best || S.best);
+  $('pos').textContent = f.pos ? 'P' + f.pos : '—';
+  var d = f.delta != null ? f.delta : deltaStimato(f);
+  var de = $('delta');
+  if(d == null){ de.textContent = '—'; de.className = 'mono'; }
+  else { de.textContent = (d > 0 ? '+' : '') + (d / 1000).toFixed(2); de.className = 'mono ' + (Math.abs(d) < 10 ? '' : (d < 0 ? 'pos' : 'neg')); }
+  // benzina
+  var fpl = f.fuelLap || media(S.fuelLap);
+  if(f.fuel != null) $('fuel').textContent = f.fuel.toFixed(1) + ' L';
+  else if(f.fuelPct != null) $('fuel').textContent = f.fuelPct.toFixed(0) + '%';
+  $('fpl').textContent = fpl ? fpl.toFixed(2) + ' L' : '—';
+  var restanti = (f.fuel != null && fpl) ? f.fuel / fpl : null;
+  $('fgiri').textContent = restanti != null ? restanti.toFixed(1) : '—';
+  var nota = '';
+  if(restanti != null && S.sess.left && (f.last || S.best)){
+    var giroMs = f.last || S.best, giriSess = S.sess.left / giroMs + 1;
+    var serve = (giriSess - restanti) * fpl;
+    nota = T('per finire la sessione servono') + ' ' + Math.abs(serve).toFixed(1) + ' ' + (serve > 0 ? T('L in più') : T('L in avanzo'));
+  }
+  $('fnota').textContent = nota;
+  // gomme
+  var nomi = ['FL', 'FR', 'RL', 'RR'], h = '';
+  for(var i = 0; i < 4; i++){
+    var t = (f.tm && f.tm[i] != null) ? f.tm[i] : (f.tt ? f.tt[i] : null);
+    var p = f.tp ? f.tp[i] : null;
+    var w = f.tw ? f.tw[i] : null;
+    h += '<div class="gomma" style="background:' + colTemp(t) + '"><div class="lbl">' + nomi[i] + '</div><div class="t mono">' + (t != null ? Math.round(t) + '°' : '—') + '</div>' +
+      '<div class="p mono">' + (p != null ? p.toFixed(2) + ' bar' : '') + (w != null ? ' · ' + Math.round(w * 100) + '%' : '') + '</div></div>';
+  }
+  $('gomme').innerHTML = h;
+  var ex = [];
+  if(f.comp) ex.push(T('mescola') + ': ' + f.comp);
+  if(f.wx && f.wx.rain != null) ex.push((f.wx.rain >= 0.05 ? '🌧 ' : '☀ ') + T(f.wx.rain < 0.05 ? 'asciutto' : 'pioggia') + (f.wx.wet != null ? ' · ' + T('pista bagnata') + ' ' + Math.round(f.wx.wet * 100) + '%' : ''));
+  if(f.dmg){ var dm = Math.max(f.dmg.body || 0, f.dmg.engine || 0, Math.max.apply(null, (f.dmg.susp || [0]).map(function(x){ return x || 0; }))); if(dm >= 0.03) ex.push('💥 ' + T('danni') + ' ' + Math.round(dm * 100) + '%'); }
+  $('comp').textContent = ex.join(' · ');
+  var e = f.e || {}, el = [];
+  [['tc', 'TC'], ['tcCut', 'CUT'], ['abs', 'ABS'], ['map', 'MAP'], ['mig', 'MIG'], ['arbF', 'ARB-A'], ['arbR', 'ARB-P']].forEach(function(p){ if(e[p[0]] != null) el.push(p[1] + ' ' + e[p[0]]); });
+  if(f.bb != null) el.push('BB ' + f.bb.toFixed(1));
+  if(e.ers && e.ers.soc != null) el.push('🔋 ' + Math.round(e.ers.soc * 100) + '%' + (e.ers.mode != null ? ' D' + e.ers.mode : ''));
+  var led = (e.tcA ? '<span style="color:#ffd60a">● TC</span> ' : '') + (e.absA ? '<span style="color:#ff453a">● ABS</span>' : '');
+  $('elet-c').style.display = el.length ? 'block' : 'none';
+  $('elet').innerHTML = el.join(' · ') + (led ? '<br>' + led : '');
+  var FL = { yellow:['GIALLA', '#ffd60a', '#000'], dyellow:['DOPPIA GIALLA', '#ffd60a', '#000'], blue:['BLU', '#0a84ff', '#fff'], white:['BIANCA', '#f2f2f2', '#000'],
+    black:['NERA', '#111', '#fff'], bw:['BIANCO-NERA', '#777', '#fff'], meatball:['NERA/ARANCIO', '#ff9f0a', '#000'], red:['ROSSA', '#ff453a', '#fff'],
+    chequered:['A SCACCHI', '#fff', '#000'], sc:['SAFETY CAR', '#ffd60a', '#000'], fcy:['FULL COURSE YELLOW', '#ffd60a', '#000'] };
+  var fl = f.fl || {}, b = fl.fcy && (!fl.f || fl.f === 'green' || fl.f === 'none') ? 'fcy' : fl.f, B = FL[b], pn = f.pen || {}, pz = [];
+  if(pn.tipo) pz.push('⚖️ ' + pn.tipo); if(pn.tempo) pz.push('⚖️ ' + pn.tempo + ' s'); if(pn.tl != null) pz.push('limiti ' + pn.tl + (pn.tlMax ? '/' + pn.tlMax : '')); if(pn.inc != null) pz.push('inc ' + pn.inc);
+  var fb = $('band');
+  if(B || pz.length){ fb.style.display = 'block'; fb.style.background = B ? B[1] : ''; fb.style.color = B ? B[2] : ''; fb.innerHTML = (B ? '🏁 ' + B[0] + (fl.sett ? ' · ' + fl.sett.map(function(x, i){ return x ? 'S' + (i + 1) : ''; }).filter(Boolean).join(' ') : '') : '') + (pz.length ? '<div style="font-size:14px;margin-top:2px">' + pz.join(' · ') + '</div>' : ''); }
+  else fb.style.display = 'none';
+}
+function media(a){ if(!a.length) return null; var s = 0; a.forEach(function(x){ s += x; }); return s / a.length; }
+function deltaStimato(f){
+  var tr = S.bestTraccia; if(!tr || !f.cur) return null;
+  var d = f.dist != null ? f.dist : (f.pct != null && S.sess.trackLen ? f.pct * S.sess.trackLen : null);
+  if(d == null) return null;
+  var lo = 0, hi = tr.length - 1;
+  if(d < tr[0][0] || d > tr[hi][0]) return null;
+  while(hi - lo > 1){ var mi = (lo + hi) >> 1; if(tr[mi][0] < d) lo = mi; else hi = mi; }
+  var a = tr[lo], b = tr[hi], k = (d - a[0]) / Math.max(0.01, b[0] - a[0]);
+  return f.cur - (a[1] + k * (b[1] - a[1]));
+}
+
+/* ── giri ── */
+function nuovoGiro(g){
+  S.giri.push(g); if(S.giri.length > 200) S.giri.shift();
+  if(g.fuel > 0 && !g.pit){ S.fuelLap.push(g.fuel); if(S.fuelLap.length > 5) S.fuelLap.shift(); }
+  if(g.valid !== false && g.ms > 0 && (!S.best || g.ms < S.best)){ S.best = g.ms; if(g.traccia && g.traccia.length > 20) S.bestTraccia = g.traccia; }
+  if(g.traccia && g.traccia.length > 50 && !S.outlineDaGiro && !g.pit){
+    var o = g.traccia.filter(function(p){ return p[8] != null; }).map(function(p){ return [p[8], p[9], p[0]]; });
+    if(o.length > 50){ S.outline = o; S.outlineDaGiro = true; }
+  }
+  var h = '';
+  S.giri.slice().reverse().forEach(function(x){
+    var s = x.s || [];
+    h += '<tr class="' + (x.ms === S.best ? 'me' : '') + '"><td>' + x.n + '</td><td class="mono">' + tempo(x.ms) + (x.valid === false ? ' <span class="inv">' + T('non valido') + '</span>' : '') +
+      '</td><td class="mono">' + secs(s[0]) + '</td><td class="mono">' + secs(s[1]) + '</td><td class="mono">' + secs(s[2]) + '</td><td class="mono">' + (x.fuel != null ? x.fuel.toFixed(2) : '—') + '</td></tr>';
+  });
+  $('giri').innerHTML = h;
+}
+
+/* ── classifica ── */
+function classifica(){
+  var c = S.cars.slice().sort(function(a, b){ return (a.pos || 999) - (b.pos || 999); });
+  var nomi = c.some(function(x){ return x.n; });
+  $('cla').innerHTML = c.map(function(x){
+    return '<tr class="' + (x.me ? 'me' : '') + '"><td>' + (x.pos || '—') + '</td><td>' + (x.num ? '#' + x.num + ' ' : '') + (x.n || (x.me ? '★' : '—')) +
+      (x.pit ? ' <span class="inv">PIT</span>' : '') + '</td><td class="mono">' + (x.lap != null ? x.lap : '—') + '</td><td class="mono">' + tempo(x.last) + '</td><td class="mono">' + tempo(x.best) + '</td></tr>';
+  }).join('');
+  $('cla-nota').textContent = c.length > 1 ? (nomi ? T('Classifica completa: nomi e tempi di tutti.') : '') : T('Questo gioco manda solo la tua auto.');
+}
+setInterval(function(){ if(vis('cla')) classifica(); }, 1000);
+
+/* ── mappa ── */
+function traccia(f){
+  if(f.x == null || f.y == null || (f.v || 0) < 5) return;
+  var u = S.ultimoPunto;
+  if(!u || Math.hypot(f.x - u[0], f.y - u[1]) > 6){
+    S.ultimoPunto = [f.x, f.y];
+    if(S.outlineDaGiro) return;
+    S.outline.push([f.x, f.y, f.dist]);
+    if(S.outline.length > 3000) S.outline.shift();
+  }
+}
+function disegnaMappa(){
+  var cv = $('mappa'), ctx = cv.getContext('2d');
+  var W = cv.width = cv.clientWidth * (devicePixelRatio || 1), H = cv.height = Math.round(W * 0.95);
+  ctx.clearRect(0, 0, W, H);
+  var pts = S.outline.concat(S.cars.filter(function(c){ return c.x != null; }).map(function(c){ return [c.x, c.y]; }));
+  if(pts.length < 2) return;
+  var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  pts.forEach(function(p){ x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+  var k = Math.min((W - 40) / Math.max(1, x1 - x0), (H - 40) / Math.max(1, y1 - y0));
+  var X = function(x){ return 20 + (x - x0) * k + ((W - 40) - (x1 - x0) * k) / 2; };
+  var Y = function(y){ return 20 + (y - y0) * k + ((H - 40) - (y1 - y0) * k) / 2; };
+  ctx.lineWidth = 7 * (devicePixelRatio || 1); ctx.strokeStyle = '#2b3242'; ctx.lineJoin = 'round';
+  ctx.beginPath(); S.outline.forEach(function(p, i){ if(i) ctx.lineTo(X(p[0]), Y(p[1])); else ctx.moveTo(X(p[0]), Y(p[1])); }); ctx.stroke();
+  var r = 6 * (devicePixelRatio || 1);
+  S.cars.forEach(function(c){
+    var x = c.x, y = c.y;
+    if((x == null || y == null) && c.pct != null && S.outline.length > 50){
+      var L0 = S.outline[S.outline.length - 1][2] || 0, idx = Math.min(S.outline.length - 1, Math.floor(c.pct * S.outline.length));
+      x = S.outline[idx][0]; y = S.outline[idx][1];
+    }
+    if(x == null) return;
+    ctx.beginPath(); ctx.arc(X(x), Y(y), c.me ? r * 1.5 : r, 0, 7);
+    ctx.fillStyle = c.me ? '#e8421a' : '#8a91a2'; ctx.fill();
+    if(c.pos && S.cars.length > 1){ ctx.fillStyle = '#fff'; ctx.font = 'bold ' + (9 * (devicePixelRatio || 1)) + 'px system-ui'; ctx.textAlign = 'center'; ctx.fillText(c.pos, X(x), Y(y) + 3 * (devicePixelRatio || 1)); }
+  });
+  var f = S.f;
+  if(f && f.x != null && !S.cars.some(function(c){ return c.me && c.x != null; })){
+    ctx.beginPath(); ctx.arc(X(f.x), Y(f.y), r * 1.5, 0, 7); ctx.fillStyle = '#e8421a'; ctx.fill();
+  }
+}
+
+/* ── schermo sempre acceso ── */
+var NOSLEEP_SRC = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAANMbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAnZ0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAEAAAABAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHubWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAKABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABmW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAVlzdGJsAAAAuXN0c2QAAAAAAAAAAQAAAKlhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAEAAQABIAAAASAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAL2F2Y0MBQsAe/+EAF2dCwB7ZBCbARAAAAwAEAAADAFA8WLkgAQAFaMuDyyAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAAXSAAAF0gAAAAYc3R0cwAAAAAAAAABAAAACgAABAAAAAAUc3RzcwAAAAAAAAABAAAAAQAAABxzdHNjAAAAAAAAAAEAAAABAAAACgAAAAEAAAA8c3RzegAAAAAAAAAAAAAACgAAAo8AAAAKAAAACgAAAAoAAAAKAAAACgAAAAoAAAAKAAAACgAAAAoAAAAUc3RjbwAAAAAAAAABAAADfAAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNTguNzYuMTAwAAAACGZyZWUAAALxbWRhdAAAAnEGBf//bdxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjMgcjMwNjAgNWRiNmFhNiAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjEgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0yIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEwIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAFmWIhA/yYoAAw+ycnJ1111111111114AAAAGQZo4H+EYAAAABkGaVAf4RgAAAAZBmmA/wjAAAAAGQZqAP8IwAAAABkGaoD/CMAAAAAZBmsA/wjAAAAAGQZrgP8IwAAAABkGbADvCMAAAAAZBmyA3wjA=';
+$('sveglia').onclick = function(){
+  var b = this;
+  if(navigator.wakeLock && window.isSecureContext){
+    navigator.wakeLock.request('screen').then(function(){ b.textContent = T('🔆 SCHERMO SEMPRE ACCESO'); }).catch(video);
+  } else video();
+  function video(){
+    var v = document.createElement('video'); v.muted = true; v.loop = true; v.setAttribute('playsinline', ''); v.src = NOSLEEP_SRC;
+    v.style.cssText = 'position:fixed;left:-9px;width:2px;height:2px;opacity:0'; document.body.appendChild(v);
+    v.play().then(function(){ b.textContent = T('🔆 SCHERMO SEMPRE ACCESO'); }).catch(function(){});
+  }
+};
+lingua(L);
+collega();
+</script>
+</body>
+</html>
