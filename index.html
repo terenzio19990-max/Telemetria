@@ -50,7 +50,7 @@ button:disabled{ opacity:.35; }
 </head>
 <body>
 <div class="wrap">
-  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.5</small></h1>
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.6</small></h1>
 
   <div class="card">
     <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
@@ -2979,6 +2979,108 @@ window.TXMEC={ apri:apriChiudi, sez:sezione, quando:quando,
   nota:function(){ var t=(($('mec-nota')||{}).value||'').trim(); if(!t && !M.foto){ alert('Scrivi la nota o scatta una foto.'); return; } if(manda({ tipo:'nota', testo:t, foto:M.foto })){ $('mec-nota').value=''; M.foto=null; $('mec-ant').style.display='none'; $('mec-foto').value=''; } } };
 function avvio(){ inietta(); agganciaBox(); }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', avvio); else avvio();
+})();
+
+</script>
+<script>
+/* ═════════════════════════════════════════════════════════════════
+   TRASMETTITORE v5.6 — SERVER DEL BOX
+
+   Se il box ha acceso «il server del box» (programma per Windows), il
+   telefono manda dati e video DIRETTAMENTE a quel PC, senza i servizi
+   gratuiti su internet. Si imposta da solo inquadrando il QR code del box
+   (la pagina si apre dal PC del box con ?srv=1&c=CODICE), oppure scrivendo
+   l'indirizzo del server qui sotto.
+   • dati: tutto quello che il trasmettitore manda (GPS, giri, centralina,
+     meccanico…) passa dal server;
+   • video: registrato a pezzi (WebM) e mandato al PC, che lo mostra come
+     video vero (riquadri e regia);
+   • se il server non risponde, il trasmettitore usa da solo i servizi di
+     prima (PeerJS / MQTT): la telemetria non si ferma.
+   ═════════════════════════════════════════════════════════════════ */
+(function(){
+'use strict';
+var SV={ base:'', ws:null, rec:null, riprova:0, voluto:false, mime:'' };
+function $(i){ return document.getElementById(i); }
+function LS(k, v){ try { if(v===undefined) return localStorage.getItem('reptx_srv_'+k); if(v===null) localStorage.removeItem('reptx_srv_'+k); else localStorage.setItem('reptx_srv_'+k, v); } catch(e){ return null; } }
+function stato(t, c){ var e=$('st-srv'); if(e){ e.textContent=t; e.style.color=c==='ok'? 'var(--green,#30d158)' : c==='err'? 'var(--red,#ff453a)' : ''; } }
+function aperto(){ return SV.ws && SV.ws.readyState===1; }
+function wsUrl(b){ return b.replace(/^http/, 'ws').replace(/\/$/, '')+'/ws'; }
+
+/* ── indirizzo del server: dal QR (pagina aperta dal PC del box) o scritto a mano ── */
+(function(){ try { var q=new URLSearchParams(location.search); if(q.get('srv')){ LS('base', location.origin); if(q.get('c')){ LS('codice', q.get('c')); } } } catch(e){} SV.base=LS('base')||''; })();
+
+function collega(){
+  if(!SV.base) return; chiudi(); SV.voluto=true;
+  var ws; try { ws=new WebSocket(wsUrl(SV.base)); } catch(e){ stato('Server del box non raggiungibile: uso i servizi di prima.', 'err'); return; }
+  ws.binaryType='arraybuffer'; SV.ws=ws; stato('Mi collego al server del box…');
+  ws.onopen=function(){ SV.riprova=0; var cod=(LS('codice')||(($('code')||{}).value||'')).trim();
+    ws.send(JSON.stringify({ t:'ciao', ruolo:'tel', nome:carName(), codice:cod }));
+    stato('✅ Collegato al server del box (niente servizi esterni)', 'ok');
+    try { TX.on=true; TX.lastAck=Date.now(); $('btn-conn').textContent='STACCA'; $('dot').className='dot on'; st('st-conn', '📡 Collegato al server del box', 'ok'); } catch(e){}
+    if((VID.want||VID.mic) && VID.stream) avviaVideo(); };
+  ws.onmessage=function(ev){ if(typeof ev.data!=='string') return; var m; try { m=JSON.parse(ev.data); } catch(e){ return; }
+    try { TX.lastAck=Date.now(); } catch(e){}
+    if(m.k==='__benvenuto') return;
+    if(m.k==='__rifiuto'){ stato('Il server ha rifiutato: '+(m.msg||'codice sbagliato')+'. Inquadra di nuovo il QR code del box.', 'err'); SV.voluto=false; return; }
+    if(m.k==='__vreinit'){ if(SV.rec) { fermaVideo(); avviaVideo(); } return; }
+    try { handleBoxMsg(m); } catch(e){} };
+  ws.onclose=function(){ if(SV.ws!==ws) return; SV.ws=null; fermaVideo(true);
+    if(SV.voluto){ stato('Server del box non raggiungibile: uso i servizi di prima, riprovo da solo…', 'err'); setTimeout(function(){ if(SV.voluto && !SV.ws) collega(); }, Math.min(15000, 1500*Math.pow(2, SV.riprova++))); } };
+  ws.onerror=function(){};
+}
+function chiudi(){ if(SV.ws){ var w=SV.ws; SV.ws=null; try { w.close(); } catch(e){} } fermaVideo(true); }
+
+/* ── dati: se il server è collegato passano da lì, altrimenti dalla strada di prima ── */
+var tx0=window.txSend;
+window.txSend=function(d){ if(aperto()){ try { d.c=carName(); SV.ws.send(JSON.stringify(d)); return true; } catch(e){} } return tx0(d); };
+
+/* ── video: MediaRecorder a pezzi verso il server ── */
+function scegliMime(st){ var aud=false; try { aud=st.getAudioTracks().length>0; } catch(e){}
+  var L=aud? ['video/webm;codecs=vp8,opus', 'video/webm'] : ['video/webm;codecs=vp8', 'video/webm'];
+  L=L.concat(['video/mp4']); for(var i=0;i<L.length;i++) try { if(window.MediaRecorder && MediaRecorder.isTypeSupported(L[i])) return L[i]; } catch(e){} return ''; }
+function avviaVideo(){
+  if(!aperto() || SV.rec) return true; var st=VID.rawStream||VID.stream; if(!st) return false;
+  var mime=scegliMime(st); if(!mime){ stato('Questo telefono non sa registrare il video per il server: uso il collegamento di prima.', 'err'); return false; }
+  var r; try { r=new MediaRecorder(st, { mimeType:mime, videoBitsPerSecond:(window.REP_APP_ANDROID? 600000 : 700000), audioBitsPerSecond:48000 }); } catch(e){ return false; }
+  SV.rec=r; SV.mime=r.mimeType||mime;
+  SV.ws.send('#vstart '+SV.mime.replace(/;codecs=/, '; codecs="').replace(/$/, SV.mime.indexOf('codecs=')>=0? '"' : ''));
+  r.ondataavailable=function(e){ if(e.data && e.data.size && aperto()){ try { SV.ws.send(e.data); VID.lastLive=Date.now(); } catch(err){} } };
+  r.onerror=function(){ fermaVideo(); };
+  r.start(300);
+  /* il resto del trasmettitore vede una «chiamata» in corso: niente doppioni con il video di prima */
+  VID.peer={ destroyed:false, disconnected:false, destroy:function(){ fermaVideo(); }, reconnect:function(){}, on:function(){} };
+  VID.call={ peerConnection:null, close:function(){ fermaVideo(); }, on:function(){} };
+  VID.lastLive=Date.now();
+  try { st('st-video', '📡 '+avLabel()+' in onda verso il server del box', 'ok'); } catch(e){}
+  return true;
+}
+function fermaVideo(anchePeer){ if(SV.rec){ try { SV.rec.stop(); } catch(e){} SV.rec=null; } if(anchePeer && VID.peer && VID.peer.destroy && !VID.peer.peerConnection && VID.call && VID.call.peerConnection===null){ VID.peer=null; VID.call=null; } }
+var dial0=window.videoDial;
+window.videoDial=function(){ if(aperto() && avviaVideo()) return; return dial0.apply(this, arguments); };
+
+/* ── CONNETTI / STACCA ── */
+var conn0=window.doConnect;
+window.doConnect=function(){
+  var eraOn=TX.on || SV.voluto;
+  if(eraOn){ SV.voluto=false; chiudi(); stato(SV.base? 'Server del box: '+SV.base : ''); return conn0.apply(this, arguments); }
+  var r=conn0.apply(this, arguments);
+  if(SV.base) collega();
+  return r;
+};
+
+/* ── riquadro nella pagina ── */
+function inietta(){
+  if($('srv-card')) return; var dopo=$('st-conn'); dopo=dopo && dopo.closest('.card'); if(!dopo) return;
+  dopo.insertAdjacentHTML('afterend', '<div class="card" id="srv-card"><div class="lbl">🖥 SERVER DEL BOX</div>'+
+    '<div class="row" style="gap:6px"><input id="srv-base" type="text" placeholder="https://pc-box.tuarete.ts.net (dal QR del box)" value="'+(SV.base||'').replace(/"/g, '')+'" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:9px;font-size:13px">'+
+    '<button class="b-gray" onclick="TXSRV.imposta()">OK</button></div>'+
+    '<div class="status" id="st-srv" style="margin-top:6px">'+(SV.base? 'Server del box: '+SV.base+' — premi CONNETTI' : 'Facoltativo: se il box ha il server acceso, inquadra il suo QR code (si compila da solo).')+'</div></div>');
+  var c=LS('codice'); if(c && $('code') && !$('code').value) $('code').value=c;
+}
+window.TXSRV={ imposta:function(){ var v=(($('srv-base')||{}).value||'').trim().replace(/\/tx\/?(\?.*)?$/, '').replace(/\/$/, ''); if(v && !/^https?:\/\//.test(v)) v='https://'+v; SV.base=v; LS('base', v||null); stato(v? 'Server del box: '+v+' — premi CONNETTI' : 'Server del box tolto: si usano i servizi di prima.'); },
+  stato:function(){ return { base:SV.base, aperto:aperto(), video:!!SV.rec, mime:SV.mime }; }, collega:collega };
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', inietta); else inietta();
 })();
 
 </script>

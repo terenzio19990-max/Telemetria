@@ -1,4 +1,4 @@
-var CACHE='rep-telefono-v5.5';
+var CACHE='rep-telefono-v5.6';
 var ASSETS=["./", "./index.html", "./manifest.json", "./icon-192.svg", "./icon-512.svg"];
 self.addEventListener('install',function(ev){
   ev.waitUntil(caches.open(CACHE).then(function(c){ return c.addAll(ASSETS).catch(function(){}); }));
