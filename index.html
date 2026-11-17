@@ -50,7 +50,7 @@ button:disabled{ opacity:.35; }
 </head>
 <body>
 <div class="wrap">
-  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.6</small></h1>
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.8</small></h1>
 
   <div class="card">
     <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
@@ -2984,7 +2984,7 @@ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded'
 </script>
 <script>
 /* ═════════════════════════════════════════════════════════════════
-   TRASMETTITORE v5.6 — SERVER DEL BOX
+   TRASMETTITORE v5.8 — SERVER DEL BOX
 
    Se il box ha acceso «il server del box» (programma per Windows), il
    telefono manda dati e video DIRETTAMENTE a quel PC, senza i servizi
@@ -3023,7 +3023,8 @@ function collega(){
     try { TX.lastAck=Date.now(); } catch(e){}
     if(m.k==='__benvenuto') return;
     if(m.k==='__rifiuto'){ stato('Il server ha rifiutato: '+(m.msg||'codice sbagliato')+'. Inquadra di nuovo il QR code del box.', 'err'); SV.voluto=false; return; }
-    if(m.k==='__vreinit'){ if(SV.rec) { fermaVideo(); avviaVideo(); } return; }
+    if(m.k==='__vreinit'){ if(SV.rec || SV.pc) { fermaVideo(); avviaVideo(); } return; }
+    if(m.k==='__rtc'){ rtcMsg(m); return; }
     try { handleBoxMsg(m); } catch(e){} };
   ws.onclose=function(){ if(SV.ws!==ws) return; SV.ws=null; fermaVideo(true);
     if(SV.voluto){ stato('Server del box non raggiungibile: uso i servizi di prima, riprovo da solo…', 'err'); setTimeout(function(){ if(SV.voluto && !SV.ws) collega(); }, Math.min(15000, 1500*Math.pow(2, SV.riprova++))); } };
@@ -3039,23 +3040,159 @@ window.txSend=function(d){ if(aperto()){ try { d.c=carName(); SV.ws.send(JSON.st
 function scegliMime(st){ var aud=false; try { aud=st.getAudioTracks().length>0; } catch(e){}
   var L=aud? ['video/webm;codecs=vp8,opus', 'video/webm'] : ['video/webm;codecs=vp8', 'video/webm'];
   L=L.concat(['video/mp4']); for(var i=0;i<L.length;i++) try { if(window.MediaRecorder && MediaRecorder.isTypeSupported(L[i])) return L[i]; } catch(e){} return ''; }
+/* v5.7: il video va al PC con WebRTC (ritardo ~0,2-0,5 s, si adatta da solo alla rete). Il server del box
+   serve solo a far «presentare» telefono e PC; se WebRTC non si collega entro 7 s si usa il video a pezzi (WebM). */
+var ICE={ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] };
+function rtcInvia(o){ if(aperto()){ o.k='__rtc'; o.c=carName(); try { SV.ws.send(JSON.stringify(o)); } catch(e){} } }
+function finti(pc){
+  /* il resto del trasmettitore vede una «chiamata» in corso (niente doppioni col video di prima, e il guardiano
+     del video controlla lo stato vero del collegamento) */
+  VID.peer={ destroyed:false, disconnected:false, destroy:function(){ fermaVideo(); }, reconnect:function(){}, on:function(){} };
+  VID.call={ peerConnection:pc||null, close:function(){ fermaVideo(); }, on:function(){} };
+  VID.lastLive=Date.now();
+}
 function avviaVideo(){
-  if(!aperto() || SV.rec) return true; var st=VID.rawStream||VID.stream; if(!st) return false;
-  var mime=scegliMime(st); if(!mime){ stato('Questo telefono non sa registrare il video per il server: uso il collegamento di prima.', 'err'); return false; }
-  var r; try { r=new MediaRecorder(st, { mimeType:mime, videoBitsPerSecond:(window.REP_APP_ANDROID? 600000 : 700000), audioBitsPerSecond:48000 }); } catch(e){ return false; }
+  if(SV.pc && SV.soloAscolto) fermaVideo();
+  if(!aperto() || SV.rec || SV.pc) return true; var fl=VID.rawStream||VID.stream; if(!fl) return false;
+  if(fl!==SV.flusso) SV.hd=null;
+  SV.flusso=fl; SV.tracce=traccePrese(fl);
+  if(window.RTCPeerConnection && !SV.soloWebm) return avviaRtc(fl);
+  return avviaWebm(fl);
+}
+function traccePrese(fl){ try { return fl.getTracks().map(function(t){ return t.id; }).join(','); } catch(e){ return ''; } }
+function avviaRtc(fl){
+  var pc; try { pc=new RTCPeerConnection(ICE); } catch(e){ SV.soloWebm=true; return avviaWebm(fl); }
+  var id=Date.now().toString(36); SV.pc=pc; SV.rtcId=id; SV.coda=[]; SV.soloAscolto=false; SV.prec=null;
+  fl.getTracks().forEach(function(t){ var snd=pc.addTrack(t, fl);
+    if(t.kind==='video'){ try { var p=snd.getParameters(); p.encodings=p.encodings&&p.encodings.length? p.encodings : [{}]; p.encodings[0].maxBitrate=window.REP_APP_ANDROID? 900000 : 1000000; p.encodings[0].maxFramerate=15; p.degradationPreference='maintain-framerate'; snd.setParameters(p).catch(function(){}); } catch(e){} try { t.contentHint='motion'; } catch(e){} } });
+  /* il canale per sentire il box va aggiunto DOPO le tracce: altrimenti il microfono del telefono lo «occuperebbe» */
+  var ptt=preparaAscolto(pc);
+  pc.onicecandidate=function(e){ if(e.candidate && SV.pc===pc) rtcInvia({ t:'ice', id:id, cand:e.candidate.toJSON? e.candidate.toJSON() : e.candidate }); };
+  pc.onconnectionstatechange=function(){ if(SV.pc!==pc) return; var c=pc.connectionState;
+    if(c==='connected'){ SV.daQuando=Date.now(); applicaQual(); clearTimeout(SV.rtcT); SV.rtcFalliti=0; VID.lastLive=Date.now(); try { st('st-video', '📡 '+avLabel()+' in onda verso il server del box (diretto, ritardo minimo)', 'ok'); } catch(e){} }
+    if(c==='failed'){ rtcFallito('collegamento diretto non riuscito'); } };
+  finti(pc);
+  pc.createOffer().then(function(o){ return pc.setLocalDescription(o); }).then(function(){ rtcInvia({ t:'offer', id:id, sdp:pc.localDescription.sdp, pttMid:ptt && ptt.mid }); applicaQual(); })
+    .catch(function(e){ rtcFallito(e.message); });
+  clearTimeout(SV.rtcT); SV.rtcT=setTimeout(function(){ if(SV.pc===pc && pc.connectionState!=='connected') rtcFallito('il PC non risponde in diretta'); }, 7000);
+  try { st('st-video', 'Collego il video al server del box…'); } catch(e){}
+  return true;
+}
+function rtcFallito(perche){
+  var pc=SV.pc; if(!pc) return; SV.pc=null; try { pc.close(); } catch(e){}
+  SV.rtcFalliti=(SV.rtcFalliti||0)+1; if(SV.rtcFalliti>=2) SV.soloWebm=true;   /* due volte di fila: su questa rete si usa il video a pezzi */
+  stato('Video diretto non riuscito ('+perche+'): uso il video a pezzi attraverso il server.', 'err');
+  var fl=VID.rawStream||VID.stream; if(fl && aperto()) avviaWebm(fl);
+}
+function rtcMsg(m){
+  if(m.t==='qual'){ impostaQual(m.q, true); return; }
+  if(m.t==='ptt'){ bannerPtt(!!m.on); return; }
+  if(m.t==='vuoleAscolto'){ avviaSoloAscolto(); return; }
+  var pc=SV.pc; if(!pc || m.id!==SV.rtcId) return;
+  if(m.t==='answer') pc.setRemoteDescription({ type:'answer', sdp:m.sdp }).catch(function(e){ rtcFallito(e.message); });
+  else if(m.t==='ice' && m.cand) pc.addIceCandidate(m.cand).catch(function(){});
+  else if(m.t==='no') rtcFallito(m.msg||'il PC non può');
+}
+function avviaWebm(fl){
+  var mime=scegliMime(fl); if(!mime){ stato('Questo telefono non sa registrare il video per il server: uso il collegamento di prima.', 'err'); return false; }
+  var r; try { r=new MediaRecorder(fl, { mimeType:mime, videoBitsPerSecond:(window.REP_APP_ANDROID? 600000 : 700000), audioBitsPerSecond:48000 }); } catch(e){ return false; }
   SV.rec=r; SV.mime=r.mimeType||mime;
   SV.ws.send('#vstart '+SV.mime.replace(/;codecs=/, '; codecs="').replace(/$/, SV.mime.indexOf('codecs=')>=0? '"' : ''));
-  r.ondataavailable=function(e){ if(e.data && e.data.size && aperto()){ try { SV.ws.send(e.data); VID.lastLive=Date.now(); } catch(err){} } };
+  r.ondataavailable=function(e){ if(e.data && e.data.size && aperto()){ try { if(SV.ws.bufferedAmount > 1500000) return;   /* rete lenta: si salta un pezzo invece di accumulare ritardo */
+    SV.ws.send(e.data); VID.lastLive=Date.now(); } catch(err){} } };
   r.onerror=function(){ fermaVideo(); };
-  r.start(300);
-  /* il resto del trasmettitore vede una «chiamata» in corso: niente doppioni con il video di prima */
-  VID.peer={ destroyed:false, disconnected:false, destroy:function(){ fermaVideo(); }, reconnect:function(){}, on:function(){} };
-  VID.call={ peerConnection:null, close:function(){ fermaVideo(); }, on:function(){} };
-  VID.lastLive=Date.now();
+  r.start(200);
+  finti(null);
   try { st('st-video', '📡 '+avLabel()+' in onda verso il server del box', 'ok'); } catch(e){}
   return true;
 }
-function fermaVideo(anchePeer){ if(SV.rec){ try { SV.rec.stop(); } catch(e){} SV.rec=null; } if(anchePeer && VID.peer && VID.peer.destroy && !VID.peer.peerConnection && VID.call && VID.call.peerConnection===null){ VID.peer=null; VID.call=null; } }
+/* se cambiano le tracce (formato verticale/orizzontale, microfono acceso dopo) il video ricomincia da solo */
+setInterval(function(){ if(!(SV.rec || SV.pc) || SV.soloAscolto) return; var fl=VID.rawStream||VID.stream; if(!fl) return;
+  if(fl!==SV.flusso || traccePrese(fl)!==SV.tracce){ fermaVideo(); avviaVideo(); } }, 1000);
+function fermaVideo(anchePeer){ clearTimeout(SV.rtcT); if(SV.pc){ var pc=SV.pc; SV.pc=null; try { rtcInvia({ t:'fine', id:SV.rtcId }); } catch(e){} try { pc.close(); } catch(e){} } if(SV.rec){ try { SV.rec.stop(); } catch(e){} SV.rec=null; } if(anchePeer && VID.peer && VID.peer._srv){ VID.peer=null; VID.call=null; } }
+/* ═══ v5.8: QUALITÀ VIDEO, STATISTICHE DEL COLLEGAMENTO, INTERFONO DAL BOX ═══
+   • qualità Auto/Bassa/Media/Alta: in Auto il telefono guarda la rete ogni 2 s e scende o sale da solo
+     (meglio un'immagine meno definita che arriva subito, che una bella che arriva in ritardo);
+   • ogni 2 s il telefono manda al box: ritardo, perdita, velocità, risoluzione, batteria e tipo di rete;
+   • interfono: il box parla, il telefono riproduce (nelle cuffie/altoparlante del pilota). */
+var QUAL={
+  bassa:{ nome:'Bassa', br:300000, fps:10, scala:2 },
+  media:{ nome:'Media', br:800000, fps:15, scala:1 },
+  alta:{ nome:'Alta', br:1600000, fps:24, scala:1, hd:true }
+};
+SV.qual=LS('qual')||'auto'; SV.liv=SV.qual==='auto'? 'media' : SV.qual; SV.buoni=0; SV.cattivi=0;
+function videoSender(){ try { return SV.pc && SV.pc.getSenders().filter(function(x){ return x.track && x.track.kind==='video'; })[0]; } catch(e){ return null; } }
+function applicaQual(){
+  var Q=QUAL[SV.liv]||QUAL.media, snd=videoSender(); if(!snd) return;
+  try { var p=snd.getParameters(); p.encodings=p.encodings&&p.encodings.length? p.encodings : [{}];
+    p.encodings[0].maxBitrate=Q.br; p.encodings[0].maxFramerate=Q.fps; p.encodings[0].scaleResolutionDownBy=Q.scala; snd.setParameters(p).catch(function(){}); } catch(e){}
+  /* in Alta la camera passa a 1280×720 (se il telefono ce la fa), nelle altre resta a 640×360 */
+  try { var t=VID.rawStream && VID.rawStream.getVideoTracks()[0]; if(t && t.applyConstraints && SV.hd!==!!Q.hd){ SV.hd=!!Q.hd;
+    var w=Q.hd? 1280 : 640, h=Q.hd? 720 : 360; t.applyConstraints(VID.portrait? { width:{ ideal:h }, height:{ ideal:w }, frameRate:{ ideal:Q.fps } } : { width:{ ideal:w }, height:{ ideal:h }, frameRate:{ ideal:Q.fps } }).catch(function(){}); } } catch(e){}
+  mostraQual();
+}
+function impostaQual(q, dalBox){ if(q!=='auto' && !QUAL[q]) return; SV.qual=q; LS('qual', q); SV.buoni=SV.cattivi=0; if(q!=='auto') SV.liv=q; applicaQual(); var s=$('srv-qual'); if(s) s.value=q;
+  if(dalBox){ try { st('st-video', '🎛 Il box ha impostato la qualità video: '+(q==='auto'? 'Auto' : QUAL[q].nome), 'ok'); } catch(e){} } }
+function mostraQual(){ var e=$('srv-qinfo'); if(!e) return; var x=SV.ultimo||{};
+  e.textContent='Qualità '+(SV.qual==='auto'? 'Auto → '+QUAL[SV.liv].nome : QUAL[SV.liv].nome)+(x.kbps!=null? ' · '+x.kbps+' kbit/s' : '')+(x.rtt!=null? ' · ritardo rete '+x.rtt+' ms' : '')+(x.perdita!=null? ' · persi '+x.perdita+'%' : '')+(x.w? ' · '+x.w+'×'+x.h : '')+(x.modo? ' · '+x.modo : ''); }
+var BATT=null; try { if(navigator.getBattery) navigator.getBattery().then(function(b){ BATT=b; }); } catch(e){}
+function rete(){ try { var c=navigator.connection; return c? (c.type && c.type!=='unknown'? c.type+' ' : '')+(c.effectiveType||'') : ''; } catch(e){ return ''; } }
+function statistiche(){
+  if(!aperto()) return;
+  var base={ batt:BATT? Math.round(BATT.level*100)+(BATT.charging? '+' : '') : '', rete:rete(), q:SV.qual, liv:SV.liv };
+  if(SV.rec){ var x={ modo:'video a pezzi', kbps:null, coda:Math.round(SV.ws.bufferedAmount/1024) }; SV.ultimo=Object.assign(x, base); mostraQual(); rtcInvia(Object.assign({ t:'stat', id:'' }, SV.ultimo)); return; }
+  var pc=SV.pc; if(!pc || SV.soloAscolto || pc.connectionState!=='connected'){ if(SV.soloAscolto) rtcInvia(Object.assign({ t:'stat', id:SV.rtcId, modo:'solo interfono' }, base)); return; }
+  pc.getStats().then(function(R){
+    var o=null, rem=null, cp=null, loc={}, remc={};
+    R.forEach(function(r){
+      if(r.type==='outbound-rtp' && (r.kind||r.mediaType)==='video') o=r;
+      else if(r.type==='remote-inbound-rtp' && (r.kind||r.mediaType)==='video') rem=r;
+      else if(r.type==='candidate-pair' && (r.nominated || r.selected) && r.state==='succeeded') cp=r;
+      else if(r.type==='local-candidate') loc[r.id]=r; else if(r.type==='remote-candidate') remc[r.id]=r;
+    });
+    var x={ modo:'diretto' }, ora=Date.now();
+    if(o){ if(SV.prec && SV.prec.o){ var dt=(o.timestamp-SV.prec.o.timestamp)/1000; if(dt>0) x.kbps=Math.round((o.bytesSent-SV.prec.o.bytesSent)*8/dt/1000); }
+      x.w=o.frameWidth||0; x.h=o.frameHeight||0; x.fps=Math.round(o.framesPerSecond||0); x.lim=o.qualityLimitationReason||''; }
+    if(rem){ if(rem.roundTripTime!=null) x.rtt=Math.round(rem.roundTripTime*1000); if(rem.fractionLost!=null) x.perdita=Math.round(rem.fractionLost*1000)/10; }
+    if(cp){ if(x.rtt==null && cp.currentRoundTripTime!=null) x.rtt=Math.round(cp.currentRoundTripTime*1000); if(cp.availableOutgoingBitrate) x.disp=Math.round(cp.availableOutgoingBitrate/1000);
+      var lc=loc[cp.localCandidateId]||{}, rc=remc[cp.remoteCandidateId]||{};
+      x.via=(lc.candidateType==='relay' || rc.candidateType==='relay')? 'ripetitore' : (/^100\./.test(rc.address||rc.ip||'') || /^100\./.test(lc.address||lc.ip||''))? 'Tailscale' : 'diretto'; x.modo=x.via; }
+    SV.prec={ o:o, t:ora }; SV.ultimo=Object.assign(x, base);
+    if(SV.qual==='auto') autoQual(x);
+    mostraQual(); rtcInvia(Object.assign({ t:'stat', id:SV.rtcId }, SV.ultimo));
+  }).catch(function(){});
+}
+/* Auto: 3 letture cattive di fila → si scende; 5 buone di fila → si sale */
+function autoQual(x){
+  var Q=QUAL[SV.liv], disp=x.disp||0;
+  if(SV.daQuando && Date.now()-SV.daQuando<12000 && !x._prova) return SV.liv;   /* nei primi secondi WebRTC parte piano e «sale»: non è rete cattiva */
+  var male=(x.perdita!=null && x.perdita>4) || (x.rtt!=null && x.rtt>450) || (disp && disp<Q.br/1000*0.6);
+  var bene=(x.perdita==null || x.perdita<1) && (x.rtt==null || x.rtt<200) && (!disp || disp>(SV.liv==='bassa'? 1100 : 2200));
+  if(male){ SV.cattivi++; SV.buoni=0; } else if(bene){ SV.buoni++; SV.cattivi=0; } else { SV.buoni=0; SV.cattivi=0; }
+  var nuovo=SV.liv;
+  if(SV.cattivi>=3){ nuovo=SV.liv==='alta'? 'media' : 'bassa'; SV.cattivi=0; }
+  else if(SV.buoni>=5){ nuovo=SV.liv==='bassa'? 'media' : 'alta'; SV.buoni=0; }
+  if(nuovo!==SV.liv){ SV.liv=nuovo; applicaQual(); }
+}
+setInterval(statistiche, 2000);
+/* ── interfono: il canale per sentire il box ── */
+function preparaAscolto(pc){
+  var tr=null; try { tr=pc.addTransceiver('audio', { direction:'recvonly' }); } catch(e){ return null; }
+  pc.ontrack=function(e){ if(e.track && e.track.kind==='audio' && (!tr || e.transceiver===tr)){ var a=elAudio(); try { a.srcObject=new MediaStream([e.track]); a.play().catch(function(){ chiediTocco(); }); } catch(x){} } };
+  SV.pttTr=tr; return tr;
+}
+function elAudio(){ if(!SV.audio){ var a=document.createElement('audio'); a.autoplay=true; a.setAttribute('playsinline', ''); a.style.display='none'; document.body.appendChild(a); SV.audio=a; } return SV.audio; }
+function chiediTocco(){ var b=$('srv-ptt'); if(!b) return; b.style.display='block'; b.textContent='🔈 TOCCA QUI per sentire il box'; b.onclick=function(){ try { elAudio().play(); } catch(e){} b.style.display='none'; }; }
+function bannerPtt(on){ var b=$('srv-ptt'); if(!b) return; b.onclick=null; b.style.display=on? 'block' : 'none'; b.textContent='🎧 IL BOX STA PARLANDO'; if(on){ try { var a=elAudio(); if(a.paused) a.play().catch(function(){ chiediTocco(); }); } catch(e){} try { if(navigator.vibrate) navigator.vibrate(120); } catch(e){} } }
+function avviaSoloAscolto(){
+  if(!aperto() || SV.pc || SV.rec || !window.RTCPeerConnection) return;
+  var pc; try { pc=new RTCPeerConnection(ICE); } catch(e){ return; }
+  var id=Date.now().toString(36); SV.pc=pc; SV.rtcId=id; SV.soloAscolto=true;
+  var tr=preparaAscolto(pc);
+  pc.onicecandidate=function(e){ if(e.candidate && SV.pc===pc) rtcInvia({ t:'ice', id:id, cand:e.candidate.toJSON? e.candidate.toJSON() : e.candidate }); };
+  pc.onconnectionstatechange=function(){ if(SV.pc===pc && pc.connectionState==='failed'){ SV.pc=null; try { pc.close(); } catch(e){} } };
+  pc.createOffer().then(function(o){ return pc.setLocalDescription(o); }).then(function(){ rtcInvia({ t:'offer', id:id, sdp:pc.localDescription.sdp, pttMid:tr && tr.mid, solo:true }); }).catch(function(){});
+}
 var dial0=window.videoDial;
 window.videoDial=function(){ if(aperto() && avviaVideo()) return; return dial0.apply(this, arguments); };
 
@@ -3065,6 +3202,7 @@ window.doConnect=function(){
   var eraOn=TX.on || SV.voluto;
   if(eraOn){ SV.voluto=false; chiudi(); stato(SV.base? 'Server del box: '+SV.base : ''); return conn0.apply(this, arguments); }
   var r=conn0.apply(this, arguments);
+  try { var au=elAudio(); au.muted=false; au.play().catch(function(){}); } catch(e){}   /* il tocco su CONNETTI «sblocca» l'audio dell'interfono (iPhone) */
   if(SV.base) collega();
   return r;
 };
@@ -3075,11 +3213,18 @@ function inietta(){
   dopo.insertAdjacentHTML('afterend', '<div class="card" id="srv-card"><div class="lbl">🖥 SERVER DEL BOX</div>'+
     '<div class="row" style="gap:6px"><input id="srv-base" type="text" placeholder="https://pc-box.tuarete.ts.net (dal QR del box)" value="'+(SV.base||'').replace(/"/g, '')+'" autocomplete="off" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:9px;font-size:13px">'+
     '<button class="b-gray" onclick="TXSRV.imposta()">OK</button></div>'+
-    '<div class="status" id="st-srv" style="margin-top:6px">'+(SV.base? 'Server del box: '+SV.base+' — premi CONNETTI' : 'Facoltativo: se il box ha il server acceso, inquadra il suo QR code (si compila da solo).')+'</div></div>');
+    '<div class="status" id="st-srv" style="margin-top:6px">'+(SV.base? 'Server del box: '+SV.base+' — premi CONNETTI' : 'Facoltativo: se il box ha il server acceso, inquadra il suo QR code (si compila da solo).')+'</div>'+
+    '<div class="row" style="gap:6px;margin-top:8px;align-items:center"><span style="font-size:12px;opacity:.8">Qualità video</span><select id="srv-qual" onchange="TXSRV.qualita(this.value)" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:6px">'+
+      '<option value="auto">Auto (consigliata)</option><option value="bassa">Bassa — rete scarsa</option><option value="media">Media</option><option value="alta">Alta — rete buona</option></select></div>'+
+    '<div class="status" id="srv-qinfo" style="margin-top:4px;font-size:11px;opacity:.75"></div>'+
+    '<div id="srv-ptt" style="display:none;margin-top:8px;padding:12px;border-radius:10px;background:#0a84ff;color:#fff;font-weight:800;text-align:center;font-size:16px">🎧 IL BOX STA PARLANDO</div></div>');
+  var q=$('srv-qual'); if(q) q.value=SV.qual;
   var c=LS('codice'); if(c && $('code') && !$('code').value) $('code').value=c;
 }
 window.TXSRV={ imposta:function(){ var v=(($('srv-base')||{}).value||'').trim().replace(/\/tx\/?(\?.*)?$/, '').replace(/\/$/, ''); if(v && !/^https?:\/\//.test(v)) v='https://'+v; SV.base=v; LS('base', v||null); stato(v? 'Server del box: '+v+' — premi CONNETTI' : 'Server del box tolto: si usano i servizi di prima.'); },
-  stato:function(){ return { base:SV.base, aperto:aperto(), video:!!SV.rec, mime:SV.mime }; }, collega:collega };
+  stato:function(){ return { base:SV.base, aperto:aperto(), video:!!(SV.rec || SV.pc), webm:!!SV.rec, rtc:SV.pc? SV.pc.connectionState : '', mime:SV.rec? SV.mime : '' }; }, collega:collega,
+  soloWebm:function(b){ SV.soloWebm=!!b; SV.rtcFalliti=0; },
+  qualita:function(q){ impostaQual(q); }, _auto:function(x){ x._prova=1; autoQual(x); return SV.liv; }, info:function(){ return { qual:SV.qual, liv:SV.liv, ultimo:SV.ultimo||null, soloAscolto:!!SV.soloAscolto, audio:!!(SV.audio && SV.audio.srcObject), ptt:($('srv-ptt')||{}).style && $('srv-ptt').style.display==='block' }; } };
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', inietta); else inietta();
 })();
 
