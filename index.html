@@ -50,7 +50,7 @@ button:disabled{ opacity:.35; }
 </head>
 <body>
 <div class="wrap">
-  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.8</small></h1>
+  <h1>📡 REP TELEMETRIA <small>trasmettitore v5.9</small></h1>
 
   <div class="card">
     <div class="lbl"><span class="dot" id="dot"></span>COLLEGAMENTO AL BOX</div>
@@ -3064,7 +3064,7 @@ function avviaRtc(fl){
   var pc; try { pc=new RTCPeerConnection(ICE); } catch(e){ SV.soloWebm=true; return avviaWebm(fl); }
   var id=Date.now().toString(36); SV.pc=pc; SV.rtcId=id; SV.coda=[]; SV.soloAscolto=false; SV.prec=null;
   fl.getTracks().forEach(function(t){ var snd=pc.addTrack(t, fl);
-    if(t.kind==='video'){ try { var p=snd.getParameters(); p.encodings=p.encodings&&p.encodings.length? p.encodings : [{}]; p.encodings[0].maxBitrate=window.REP_APP_ANDROID? 900000 : 1000000; p.encodings[0].maxFramerate=15; p.degradationPreference='maintain-framerate'; snd.setParameters(p).catch(function(){}); } catch(e){} try { t.contentHint='motion'; } catch(e){} } });
+    if(t.kind==='video'){ try { var p=snd.getParameters(); p.encodings=p.encodings&&p.encodings.length? p.encodings : [{}]; p.encodings[0].maxBitrate=(QUAL[SV.liv]||QUAL.media).br; p.encodings[0].maxFramerate=(QUAL[SV.liv]||QUAL.media).fps; p.degradationPreference='balanced'; snd.setParameters(p).catch(function(){}); } catch(e){} try { t.contentHint='motion'; } catch(e){} } });
   /* il canale per sentire il box va aggiunto DOPO le tracce: altrimenti il microfono del telefono lo «occuperebbe» */
   var ptt=preparaAscolto(pc);
   pc.onicecandidate=function(e){ if(e.candidate && SV.pc===pc) rtcInvia({ t:'ice', id:id, cand:e.candidate.toJSON? e.candidate.toJSON() : e.candidate }); };
@@ -3116,9 +3116,9 @@ function fermaVideo(anchePeer){ clearTimeout(SV.rtcT); if(SV.pc){ var pc=SV.pc; 
    • ogni 2 s il telefono manda al box: ritardo, perdita, velocità, risoluzione, batteria e tipo di rete;
    • interfono: il box parla, il telefono riproduce (nelle cuffie/altoparlante del pilota). */
 var QUAL={
-  bassa:{ nome:'Bassa', br:300000, fps:10, scala:2 },
-  media:{ nome:'Media', br:800000, fps:15, scala:1 },
-  alta:{ nome:'Alta', br:1600000, fps:24, scala:1, hd:true }
+  bassa:{ nome:'Bassa', br:450000, fps:12, scala:1, w:640, h:360 },
+  media:{ nome:'Media', br:1300000, fps:20, scala:1, w:960, h:540 },
+  alta:{ nome:'Alta', br:2600000, fps:25, scala:1, w:1280, h:720, hd:true }
 };
 SV.qual=LS('qual')||'auto'; SV.liv=SV.qual==='auto'? 'media' : SV.qual; SV.buoni=0; SV.cattivi=0;
 function videoSender(){ try { return SV.pc && SV.pc.getSenders().filter(function(x){ return x.track && x.track.kind==='video'; })[0]; } catch(e){ return null; } }
@@ -3126,9 +3126,9 @@ function applicaQual(){
   var Q=QUAL[SV.liv]||QUAL.media, snd=videoSender(); if(!snd) return;
   try { var p=snd.getParameters(); p.encodings=p.encodings&&p.encodings.length? p.encodings : [{}];
     p.encodings[0].maxBitrate=Q.br; p.encodings[0].maxFramerate=Q.fps; p.encodings[0].scaleResolutionDownBy=Q.scala; snd.setParameters(p).catch(function(){}); } catch(e){}
-  /* in Alta la camera passa a 1280×720 (se il telefono ce la fa), nelle altre resta a 640×360 */
-  try { var t=VID.rawStream && VID.rawStream.getVideoTracks()[0]; if(t && t.applyConstraints && SV.hd!==!!Q.hd){ SV.hd=!!Q.hd;
-    var w=Q.hd? 1280 : 640, h=Q.hd? 720 : 360; t.applyConstraints(VID.portrait? { width:{ ideal:h }, height:{ ideal:w }, frameRate:{ ideal:Q.fps } } : { width:{ ideal:w }, height:{ ideal:h }, frameRate:{ ideal:Q.fps } }).catch(function(){}); } } catch(e){}
+  /* v5.9: la camera segue il livello: Bassa 640×360, Media 960×540, Alta 1280×720 (se il telefono ce la fa) */
+  try { var t=VID.rawStream && VID.rawStream.getVideoTracks()[0], ch=Q.w+'x'+Q.h+'@'+Q.fps+(VID.portrait? 'v' : 'o'); if(t && t.applyConstraints && SV.hd!==ch){ SV.hd=ch;
+    var w=Q.w, h=Q.h; t.applyConstraints(VID.portrait? { width:{ ideal:h }, height:{ ideal:w }, frameRate:{ ideal:Q.fps } } : { width:{ ideal:w }, height:{ ideal:h }, frameRate:{ ideal:Q.fps } }).catch(function(){}); } } catch(e){}
   mostraQual();
 }
 function impostaQual(q, dalBox){ if(q!=='auto' && !QUAL[q]) return; SV.qual=q; LS('qual', q); SV.buoni=SV.cattivi=0; if(q!=='auto') SV.liv=q; applicaQual(); var s=$('srv-qual'); if(s) s.value=q;
@@ -3167,11 +3167,13 @@ function autoQual(x){
   var Q=QUAL[SV.liv], disp=x.disp||0;
   if(SV.daQuando && Date.now()-SV.daQuando<12000 && !x._prova) return SV.liv;   /* nei primi secondi WebRTC parte piano e «sale»: non è rete cattiva */
   var male=(x.perdita!=null && x.perdita>4) || (x.rtt!=null && x.rtt>450) || (disp && disp<Q.br/1000*0.6);
-  var bene=(x.perdita==null || x.perdita<1) && (x.rtt==null || x.rtt<200) && (!disp || disp>(SV.liv==='bassa'? 1100 : 2200));
+  /* v5.9: la banda stimata da WebRTC cresce solo se serve, quindi non si aspetta che superi la soglia del livello sopra:
+     basta che la rete regga bene quello attuale (niente perdite, ritardo basso, banda non al limite) */
+  var bene=(x.perdita==null || x.perdita<1.5) && (x.rtt==null || x.rtt<250) && (!disp || disp>Q.br/1000*0.9);
   if(male){ SV.cattivi++; SV.buoni=0; } else if(bene){ SV.buoni++; SV.cattivi=0; } else { SV.buoni=0; SV.cattivi=0; }
   var nuovo=SV.liv;
   if(SV.cattivi>=3){ nuovo=SV.liv==='alta'? 'media' : 'bassa'; SV.cattivi=0; }
-  else if(SV.buoni>=5){ nuovo=SV.liv==='bassa'? 'media' : 'alta'; SV.buoni=0; }
+  else if(SV.buoni>=3){ nuovo=SV.liv==='bassa'? 'media' : 'alta'; SV.buoni=0; }
   if(nuovo!==SV.liv){ SV.liv=nuovo; applicaQual(); }
 }
 setInterval(statistiche, 2000);
